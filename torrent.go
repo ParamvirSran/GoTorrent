@@ -25,11 +25,6 @@ type File struct {
 	Path   []string
 }
 
-// Read the given file path as a byte slice
-func ReadFile(filePath string) ([]byte, error) {
-	return os.ReadFile(filePath)
-}
-
 // DecodeTorrentFile decodes the bencoded torrent file content
 func DecodeTorrentFile(content []byte) (*Metainfo, error) {
 	data, err := Decode(bytes.NewReader(content))
@@ -39,16 +34,19 @@ func DecodeTorrentFile(content []byte) (*Metainfo, error) {
 
 	torrentDict, ok := data.(map[string]interface{})
 	if !ok {
-		return nil, fmt.Errorf("invalid torrent file format")
+		return nil, fmt.Errorf("invalid torrent file format, could not map correctly")
 	}
 
 	torrentFile := &Metainfo{}
+
 	if announce, ok := torrentDict["announce"].(string); ok {
 		torrentFile.Announce = announce
 	}
 
 	if infoDict, ok := torrentDict["info"].(map[string]interface{}); ok {
+
 		info := Info{}
+
 		if name, ok := infoDict["name"].(string); ok {
 			info.Name = name
 		}
@@ -68,7 +66,9 @@ func DecodeTorrentFile(content []byte) (*Metainfo, error) {
 		if files, ok := infoDict["files"].([]interface{}); ok {
 			for _, file := range files {
 				if fileDict, ok := file.(map[string]interface{}); ok {
+
 					fileInfo := File{}
+
 					if length, ok := fileDict["length"].(int); ok {
 						fileInfo.Length = length
 					} else if length, ok := fileDict["length"].(int64); ok {
@@ -93,15 +93,15 @@ func DecodeTorrentFile(content []byte) (*Metainfo, error) {
 
 // ParseTorrentFile parses a torrent file and prints the decoded information
 func ParseTorrentFile(filePath string) {
-	content, err := ReadFile(filePath)
+	content, err := os.ReadFile(filePath)
 	if err != nil {
-		fmt.Printf("error reading file: %v\n", err)
+		fmt.Printf("error reading .torrent file: %v\n", err)
 		return
 	}
 
 	torrentFile, err := DecodeTorrentFile(content)
 	if err != nil {
-		fmt.Printf("error decoding torrent file: %v\n", err)
+		fmt.Printf("error decoding .torrent file into metainfo structure: %v\n", err)
 		return
 	}
 
