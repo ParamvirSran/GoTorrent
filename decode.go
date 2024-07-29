@@ -7,7 +7,7 @@ import (
 	"strconv"
 )
 
-// Decode function to decode bencoded data from an io.Reader
+// Decode function to decode data that is in bencode format
 func Decode(r io.Reader) (interface{}, error) {
 	b := make([]byte, 1)
 	_, err := r.Read(b)
@@ -27,12 +27,11 @@ func Decode(r io.Reader) (interface{}, error) {
 	}
 }
 
-// Helper function to decode integers
+// decodeInt decodes a bencoded integer
 func decodeInt(r io.Reader) (interface{}, error) {
-	b := make([]byte, 1)
-	buf := bytes.NewBuffer(nil)
-
+	buf := &bytes.Buffer{}
 	for {
+		b := make([]byte, 1)
 		_, err := r.Read(b)
 		if err != nil {
 			return nil, fmt.Errorf("error reading integer: %w", err)
@@ -50,12 +49,13 @@ func decodeInt(r io.Reader) (interface{}, error) {
 	return result, nil
 }
 
-// Helper function to decode strings
+// decodeString decodes a bencoded string
 func decodeString(r io.Reader, firstByte byte) (interface{}, error) {
-	b := make([]byte, 1)
-	buf := bytes.NewBuffer([]byte{firstByte})
+	buf := &bytes.Buffer{}
+	buf.WriteByte(firstByte)
 
 	for {
+		b := make([]byte, 1)
 		_, err := r.Read(b)
 		if err != nil {
 			return "", fmt.Errorf("error reading string length: %w", err)
@@ -66,20 +66,21 @@ func decodeString(r io.Reader, firstByte byte) (interface{}, error) {
 		buf.WriteByte(b[0])
 	}
 
-	len, err := strconv.Atoi(buf.String())
+	length, err := strconv.Atoi(buf.String())
 	if err != nil {
 		return "", fmt.Errorf("invalid string length: %w", err)
 	}
 
-	str := make([]byte, len)
+	str := make([]byte, length)
 	_, err = io.ReadFull(r, str)
 	if err != nil {
 		return "", fmt.Errorf("error reading string with parsed length: %w", err)
 	}
+
 	return string(str), nil
 }
 
-// Helper function to decode lists
+// decodeList decodes a bencoded list
 func decodeList(r io.Reader) (interface{}, error) {
 	var result []interface{}
 
@@ -95,14 +96,14 @@ func decodeList(r io.Reader) (interface{}, error) {
 		r = io.MultiReader(bytes.NewReader(b), r)
 		val, err := Decode(r)
 		if err != nil {
-			return nil, fmt.Errorf("error reading list: %w", err)
+			return nil, fmt.Errorf("error reading list item: %w", err)
 		}
 		result = append(result, val)
 	}
 	return result, nil
 }
 
-// Helper function to decode dictionaries
+// decodeDict decodes a bencoded dictionary/map
 func decodeDict(r io.Reader) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
 
@@ -124,12 +125,17 @@ func decodeDict(r io.Reader) (map[string]interface{}, error) {
 			return nil, fmt.Errorf("error reading dictionary key: %w", err)
 		}
 
+		keyStr, ok := key.(string)
+		if !ok {
+			return nil, fmt.Errorf("expected string key, got %T", key)
+		}
+
 		val, err := Decode(r)
 		if err != nil {
 			return nil, fmt.Errorf("error reading dictionary value: %w", err)
 		}
 
-		result[key.(string)] = val
+		result[keyStr] = val
 	}
 
 	return result, nil

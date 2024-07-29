@@ -20,22 +20,26 @@ func TestDecodeInt(t *testing.T) {
 		{"i-456e", -456, false},
 		{"ie", 0, true},
 		{"i12x3e", 0, true},
+		{"i2147483647e", 2147483647, false},   // Max int32 value
+		{"i-2147483648e", -2147483648, false}, // Min int32 value
 	}
 
 	for _, test := range tests {
-		reader := newReader(test.input)
-		result, err := Decode(reader)
-		if test.hasError {
-			if err == nil {
-				t.Errorf("expected an error for input %s, but got none", test.input)
+		t.Run(test.input, func(t *testing.T) {
+			reader := newReader(test.input)
+			result, err := Decode(reader)
+			if test.hasError {
+				if err == nil {
+					t.Errorf("expected an error for input %s, but got none", test.input)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error for input %s: %v", test.input, err)
+				} else if result != test.expected {
+					t.Errorf("expected %d, got %d for input %s", test.expected, result, test.input)
+				}
 			}
-		} else {
-			if err != nil {
-				t.Errorf("unexpected error for input %s: %v", test.input, err)
-			} else if result != test.expected {
-				t.Errorf("expected %d, got %d for input %s", test.expected, result, test.input)
-			}
-		}
+		})
 	}
 }
 
@@ -50,22 +54,25 @@ func TestDecodeString(t *testing.T) {
 		{"5:hello", "hello", false},
 		{"3:ab", "", true},
 		{"3:apple", "app", false},
+		{"\xff", "", true}, // Invalid UTF-8 character
 	}
 
 	for _, test := range tests {
-		reader := newReader(test.input)
-		result, err := Decode(reader)
-		if test.hasError {
-			if err == nil {
-				t.Errorf("expected an error for input %s, but got none", test.input)
+		t.Run(test.input, func(t *testing.T) {
+			reader := newReader(test.input)
+			result, err := Decode(reader)
+			if test.hasError {
+				if err == nil {
+					t.Errorf("expected an error for input %s, but got none", test.input)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error for input %s: %v", test.input, err)
+				} else if result != test.expected {
+					t.Errorf("expected %s, got %s for input %s", test.expected, result, test.input)
+				}
 			}
-		} else {
-			if err != nil {
-				t.Errorf("unexpected error for input %s: %v", test.input, err)
-			} else if result != test.expected {
-				t.Errorf("expected %s, got %s for input %s", test.expected, result, test.input)
-			}
-		}
+		})
 	}
 }
 
@@ -82,30 +89,32 @@ func TestDecodeList(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		reader := newReader(test.input)
-		result, err := Decode(reader)
-		if test.hasError {
-			if err == nil {
-				t.Errorf("expected an error for input %s, but got none", test.input)
-			}
-		} else {
-			if err != nil {
-				t.Errorf("unexpected error for input %s: %v", test.input, err)
+		t.Run(test.input, func(t *testing.T) {
+			reader := newReader(test.input)
+			result, err := Decode(reader)
+			if test.hasError {
+				if err == nil {
+					t.Errorf("expected an error for input %s, but got none", test.input)
+				}
 			} else {
-				resultList, ok := result.([]interface{})
-				if !ok {
-					t.Errorf("expected a list for input %s, but got %T", test.input, result)
-				} else if len(resultList) != len(test.expected) {
-					t.Errorf("expected length %d, got length %d for input %s", len(test.expected), len(resultList), test.input)
+				if err != nil {
+					t.Errorf("unexpected error for input %s: %v", test.input, err)
 				} else {
-					for i, v := range resultList {
-						if v != test.expected[i] {
-							t.Errorf("expected %v, got %v at index %d for input %s", test.expected[i], v, i, test.input)
+					resultList, ok := result.([]interface{})
+					if !ok {
+						t.Errorf("expected a list for input %s, but got %T", test.input, result)
+					} else if len(resultList) != len(test.expected) {
+						t.Errorf("expected length %d, got length %d for input %s", len(test.expected), len(resultList), test.input)
+					} else {
+						for i, v := range resultList {
+							if v != test.expected[i] {
+								t.Errorf("expected %v, got %v at index %d for input %s", test.expected[i], v, i, test.input)
+							}
 						}
 					}
 				}
 			}
-		}
+		})
 	}
 }
 
@@ -123,30 +132,32 @@ func TestDecodeDict(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		reader := newReader(test.input)
-		result, err := Decode(reader)
-		if test.hasError {
-			if err == nil {
-				t.Errorf("expected an error for input %s, but got none", test.input)
-			}
-		} else {
-			if err != nil {
-				t.Errorf("unexpected error for input %s: %v", test.input, err)
+		t.Run(test.input, func(t *testing.T) {
+			reader := newReader(test.input)
+			result, err := Decode(reader)
+			if test.hasError {
+				if err == nil {
+					t.Errorf("expected an error for input %s, but got none", test.input)
+				}
 			} else {
-				resultDict, ok := result.(map[string]interface{})
-				if !ok {
-					t.Errorf("expected a dictionary for input %s, but got %T", test.input, result)
-				} else if len(resultDict) != len(test.expected) {
-					t.Errorf("expected length %d, got length %d for input %s", len(test.expected), len(resultDict), test.input)
+				if err != nil {
+					t.Errorf("unexpected error for input %s: %v", test.input, err)
 				} else {
-					for k, v := range resultDict {
-						if v != test.expected[k] {
-							t.Errorf("expected %v, got %v for key %s in input %s", test.expected[k], v, k, test.input)
+					resultDict, ok := result.(map[string]interface{})
+					if !ok {
+						t.Errorf("expected a dictionary for input %s, but got %T", test.input, result)
+					} else if len(resultDict) != len(test.expected) {
+						t.Errorf("expected length %d, got length %d for input %s", len(test.expected), len(resultDict), test.input)
+					} else {
+						for k, v := range resultDict {
+							if v != test.expected[k] {
+								t.Errorf("expected %v, got %v for key %s in input %s", test.expected[k], v, k, test.input)
+							}
 						}
 					}
 				}
 			}
-		}
+		})
 	}
 }
 
@@ -164,53 +175,55 @@ func TestDecode(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		reader := newReader(test.input)
-		result, err := Decode(reader)
-		if test.hasError {
-			if err == nil {
-				t.Errorf("expected an error for input %s, but got none", test.input)
-			}
-		} else {
-			if err != nil {
-				t.Errorf("unexpected error for input %s: %v", test.input, err)
+		t.Run(test.input, func(t *testing.T) {
+			reader := newReader(test.input)
+			result, err := Decode(reader)
+			if test.hasError {
+				if err == nil {
+					t.Errorf("expected an error for input %s, but got none", test.input)
+				}
 			} else {
-				switch expected := test.expected.(type) {
-				case int:
-					if result != expected {
-						t.Errorf("expected %d, got %v for input %s", expected, result, test.input)
-					}
-				case string:
-					if result != expected {
-						t.Errorf("expected %s, got %v for input %s", expected, result, test.input)
-					}
-				case []interface{}:
-					resultList, ok := result.([]interface{})
-					if !ok {
-						t.Errorf("expected a list for input %s, but got %T", test.input, result)
-					} else if len(resultList) != len(expected) {
-						t.Errorf("expected length %d, got length %d for input %s", len(expected), len(resultList), test.input)
-					} else {
-						for i, v := range resultList {
-							if v != expected[i] {
-								t.Errorf("expected %v, got %v at index %d for input %s", expected[i], v, i, test.input)
+				if err != nil {
+					t.Errorf("unexpected error for input %s: %v", test.input, err)
+				} else {
+					switch expected := test.expected.(type) {
+					case int:
+						if result != expected {
+							t.Errorf("expected %d, got %v for input %s", expected, result, test.input)
+						}
+					case string:
+						if result != expected {
+							t.Errorf("expected %s, got %v for input %s", expected, result, test.input)
+						}
+					case []interface{}:
+						resultList, ok := result.([]interface{})
+						if !ok {
+							t.Errorf("expected a list for input %s, but got %T", test.input, result)
+						} else if len(resultList) != len(expected) {
+							t.Errorf("expected length %d, got length %d for input %s", len(expected), len(resultList), test.input)
+						} else {
+							for i, v := range resultList {
+								if v != expected[i] {
+									t.Errorf("expected %v, got %v at index %d for input %s", expected[i], v, i, test.input)
+								}
 							}
 						}
-					}
-				case map[string]interface{}:
-					resultDict, ok := result.(map[string]interface{})
-					if !ok {
-						t.Errorf("expected a dictionary for input %s, but got %T", test.input, result)
-					} else if len(resultDict) != len(expected) {
-						t.Errorf("expected length %d, got length %d for input %s", len(expected), len(resultDict), test.input)
-					} else {
-						for k, v := range resultDict {
-							if v != expected[k] {
-								t.Errorf("expected %v, got %v for key %s in input %s", expected[k], v, k, test.input)
+					case map[string]interface{}:
+						resultDict, ok := result.(map[string]interface{})
+						if !ok {
+							t.Errorf("expected a dictionary for input %s, but got %T", test.input, result)
+						} else if len(resultDict) != len(expected) {
+							t.Errorf("expected length %d, got length %d for input %s", len(expected), len(resultDict), test.input)
+						} else {
+							for k, v := range resultDict {
+								if v != expected[k] {
+									t.Errorf("expected %v, got %v for key %s in input %s", expected[k], v, k, test.input)
+								}
 							}
 						}
 					}
 				}
 			}
-		}
+		})
 	}
 }

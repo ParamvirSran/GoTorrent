@@ -6,7 +6,7 @@ import (
 	"slices"
 )
 
-// Encode function to encode Go data types to bencoded data
+// Encode encodes Go data types into bencoded data.
 func Encode(data interface{}) ([]byte, error) {
 	switch v := data.(type) {
 	case int:
@@ -18,27 +18,30 @@ func Encode(data interface{}) ([]byte, error) {
 	case map[string]interface{}:
 		return encodeDict(v)
 	default:
-		return nil, fmt.Errorf("unsupported type: %T", v)
+		return nil, fmt.Errorf("unsupported type for encoding: %T", v)
 	}
 }
 
-// Helper function to encode integers
+// encodeInt encodes an integer into bencoded format.
 func encodeInt(i int) ([]byte, error) {
 	return []byte(fmt.Sprintf("i%de", i)), nil
 }
 
-// Helper function to encode strings
+// encodeString encodes a string into bencoded format.
 func encodeString(s string) ([]byte, error) {
 	return []byte(fmt.Sprintf("%d:%s", len(s), s)), nil
 }
 
-// Helper function to encode lists
+// encodeList encodes a list into bencoded format.
 func encodeList(l []interface{}) ([]byte, error) {
 	buf := bytes.NewBufferString("l")
 	for _, item := range l {
+		if item == nil {
+			return nil, fmt.Errorf("nil value found in list; cannot encode nil as bencoded data")
+		}
 		encodedItem, err := Encode(item)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error encoding list item: %w", err)
 		}
 		buf.Write(encodedItem)
 	}
@@ -46,7 +49,7 @@ func encodeList(l []interface{}) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// Helper function to encode dictionaries
+// encodeDict encodes a dictionary into bencoded format.
 func encodeDict(d map[string]interface{}) ([]byte, error) {
 	buf := bytes.NewBufferString("d")
 	keys := make([]string, 0, len(d))
@@ -54,18 +57,23 @@ func encodeDict(d map[string]interface{}) ([]byte, error) {
 		keys = append(keys, key)
 	}
 
-	// alpha order sorting
+	// Sort keys alphabetically
 	slices.Sort(keys)
 
 	for _, key := range keys {
+		val := d[key]
+		if val == nil {
+			return nil, fmt.Errorf("nil value for key '%s'; cannot encode nil as bencoded data", key)
+		}
 		encodedKey, err := encodeString(key)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error encoding dictionary key '%s': %w", key, err)
 		}
 		buf.Write(encodedKey)
-		encodedVal, err := Encode(d[key])
+
+		encodedVal, err := Encode(val)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error encoding dictionary value for key '%s': %w", key, err)
 		}
 		buf.Write(encodedVal)
 	}
