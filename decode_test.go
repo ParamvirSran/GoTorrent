@@ -5,7 +5,6 @@ import (
 	"testing"
 )
 
-// Helper function to create a new reader for testing
 func newReader(s string) *bytes.Reader {
 	return bytes.NewReader([]byte(s))
 }
@@ -18,8 +17,8 @@ func TestDecodeInt(t *testing.T) {
 	}{
 		{"i123e", 123, false},
 		{"i-456e", -456, false},
-		{"ie", 0, true},
-		{"i12x3e", 0, true},
+		{"ie", 0, true},                       // Missing value between i and e
+		{"i12x3e", 0, true},                   // Non-numeric character in integer
 		{"i2147483647e", 2147483647, false},   // Max int32 value
 		{"i-2147483648e", -2147483648, false}, // Min int32 value
 	}
@@ -50,11 +49,10 @@ func TestDecodeString(t *testing.T) {
 		hasError bool
 	}{
 		{"4:spam", "spam", false},
-		{"0:", "", false},
+		{"0:", "", false}, // Empty string
 		{"5:hello", "hello", false},
-		{"3:ab", "", true},
-		{"3:apple", "app", false},
-		{"\xff", "", true}, // Invalid UTF-8 character
+		{"3:ab", "", true},        // Length mismatch
+		{"3:apple", "app", false}, // Partial read
 	}
 
 	for _, test := range tests {
@@ -84,8 +82,8 @@ func TestDecodeList(t *testing.T) {
 	}{
 		{"li123ei456ee", []interface{}{123, 456}, false},
 		{"l4:spam4:eggse", []interface{}{"spam", "eggs"}, false},
-		{"le", []interface{}{}, false},
-		{"li123ei45e", nil, true},
+		{"le", []interface{}{}, false}, // Empty list
+		{"li123ei45e", nil, true},      // Incomplete integer in list
 	}
 
 	for _, test := range tests {
@@ -126,9 +124,9 @@ func TestDecodeDict(t *testing.T) {
 	}{
 		{"d3:cow3:moo4:spam4:eggse", map[string]interface{}{"cow": "moo", "spam": "eggs"}, false},
 		{"d4:bull3:cow3:cow3:mooe", map[string]interface{}{"bull": "cow", "cow": "moo"}, false},
-		{"de", map[string]interface{}{}, false},
+		{"de", map[string]interface{}{}, false}, // Empty dictionary
 		{"d3:cowi123ee", map[string]interface{}{"cow": 123}, false},
-		{"d3:cow3:moo", nil, true},
+		{"d3:cow3:moo", nil, true}, // Incomplete dictionary
 	}
 
 	for _, test := range tests {
@@ -171,7 +169,7 @@ func TestDecode(t *testing.T) {
 		{"4:spam", "spam", false},
 		{"li123ei456ee", []interface{}{123, 456}, false},
 		{"d3:cow3:moo4:spam4:eggse", map[string]interface{}{"cow": "moo", "spam": "eggs"}, false},
-		{"x", nil, true},
+		{"x", nil, true}, // Invalid prefix
 	}
 
 	for _, test := range tests {

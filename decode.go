@@ -7,7 +7,6 @@ import (
 	"strconv"
 )
 
-// Decode function to decode data that is in bencode format
 func Decode(r io.Reader) (interface{}, error) {
 	b := make([]byte, 1)
 	_, err := r.Read(b)
@@ -27,7 +26,6 @@ func Decode(r io.Reader) (interface{}, error) {
 	}
 }
 
-// decodeInt decodes a bencoded integer
 func decodeInt(r io.Reader) (interface{}, error) {
 	buf := &bytes.Buffer{}
 	for {
@@ -49,7 +47,6 @@ func decodeInt(r io.Reader) (interface{}, error) {
 	return result, nil
 }
 
-// decodeString decodes a bencoded string
 func decodeString(r io.Reader, firstByte byte) (interface{}, error) {
 	buf := &bytes.Buffer{}
 	buf.WriteByte(firstByte)
@@ -58,6 +55,9 @@ func decodeString(r io.Reader, firstByte byte) (interface{}, error) {
 		b := make([]byte, 1)
 		_, err := r.Read(b)
 		if err != nil {
+			if err == io.EOF {
+				break
+			}
 			return "", fmt.Errorf("error reading string length: %w", err)
 		}
 		if b[0] == ':' {
@@ -80,7 +80,6 @@ func decodeString(r io.Reader, firstByte byte) (interface{}, error) {
 	return string(str), nil
 }
 
-// decodeList decodes a bencoded list
 func decodeList(r io.Reader) (interface{}, error) {
 	var result []interface{}
 
@@ -103,7 +102,6 @@ func decodeList(r io.Reader) (interface{}, error) {
 	return result, nil
 }
 
-// decodeDict decodes a bencoded dictionary/map
 func decodeDict(r io.Reader) (map[string]interface{}, error) {
 	result := make(map[string]interface{})
 

@@ -2,88 +2,100 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 )
 
 func main() {
-	torrentPath := "test.torrent"
+	torrentPath := "mine.torrent"
 
-	// Parse the .torrent file
+	// Parse the torrent file
 	torrentFile, err := ParseTorrentFile(torrentPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing torrent file (%s): %v\n", torrentPath, err)
 		os.Exit(1)
 	}
 
-	// // Get the info hash
-	// infoHash, err := GetInfoHash(torrentFile.Info)
-	// if err != nil {
-	// 	fmt.Fprintf(os.Stderr, "Error getting info hash: %v\n", err)
-	// 	os.Exit(1)
-	// }
-	// fmt.Println(infoHash)
-	//
-	// Generate a unique peer ID
+	// Get the info hash from the torrent file
+	infoHash, err := GetInfoHash(torrentFile.Info)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error getting info hash: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Generate a peer ID
 	peerID, err := GeneratePeerID()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error generating peer ID: %v\n", err)
 		os.Exit(1)
 	}
-	fmt.Println(peerID)
 
-	// Build the announce URL
-	announceURL := BuildAnnounceURL(
-		torrentFile.Announce,
-		"47c7105178eb58088980a4ea7fa7f5dee491dd18",
-		peerID,
-		6881,                    // Port
-		0,                       // Uploaded
-		0,                       // Downloaded
-		torrentFile.Info.Length, // Left
-		"started",               // Event
-	)
-	fmt.Println(announceURL)
-
-	// Send the GET request to the tracker
-	response, err := SendGetRequest(announceURL)
+	// Parse the announce URL
+	baseAnnounceURL, err := url.Parse(torrentFile.Announce)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error sending GET request to tracker: %v\n", err)
-		os.Exit(1)
-	}
-	fmt.Println(response)
-
-	// Parse the tracker response
-	trackerResponse, err := ParseTrackerResponse(response)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing tracker response: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Error parsing announce URL: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Print the tracker response
-	fmt.Println("Tracker Response:")
-	for key, value := range trackerResponse {
-		fmt.Printf("%s: %v\n", key, value)
+	// Collect all tracker URLs
+	trackers := []string{baseAnnounceURL.String()}
+	for _, tier := range torrentFile.AnnounceList {
+		for _, t := range tier {
+			tURL, err := url.Parse(t)
+			if err == nil && tURL.Scheme != "udp" {
+				trackers = append(trackers, tURL.String())
+			}
+		}
 	}
 
-	// Extract and print the peer list
-	peers, ok := trackerResponse["peers"].([]interface{})
-	if !ok {
-		fmt.Println("No peers found in the tracker response.")
-		return
-	}
+	// Iterate over all trackers
+	success := false
+	for _, trackerURL := range trackers {
+		fmt.Println("Trying tracker:", trackerURL)
 
-	fmt.Println("Peers:")
-	for _, peer := range peers {
-		peerInfo, ok := peer.(map[string]interface{})
-		if !ok {
-			fmt.Println("Error: Peer info not in the expected format.")
+		// Parse the tracker URL
+		baseURL, err := url.Parse(trackerURL)
+		if err != nil {
+			fmt.Println("Error parsing URL:", err)
 			continue
 		}
-		fmt.Printf("Peer ID: %s, IP: %s, Port: %d\n",
-			peerInfo["peer id"].(string),
-			peerInfo["ip"].(string),
-			int(peerInfo["port"].(int64)),
-		)
+
+		// Create query parameters
+		params := url.Values{}
+		params.Add("info_hash", string(infoHash))
+		params.Add("downloaded", "0")
+		params.Add("event", "started")
+		params.Add("left", "262144")
+		params.Add("peer_id", peerID)
+		params.Add("port", "1337")
+		params.Add("uploaded", "0")
+
+		// Attach query parameters to the URL
+		baseURL.RawQuery = params.Encode()
+
+		// Make the GET request
+		response, err := http.Get(baseURL.String())
+		if err != nil {
+			fmt.Println("Error making GET request:", err)
+			continue
+		}
+		defer response.Body.Close()
+
+		// Read and print the response body
+		body, err := io.ReadAll(response.Body)
+		if err != nil {
+			fmt.Println("Error reading response body:", err)
+			continue
+		}
+
+		fmt.Println("Response:", string(body))
+		success = true
+		break
 	}
 
+	if !success {
+		fmt.Println("Failed to get a valid response from any tracker.")
+	}
 }

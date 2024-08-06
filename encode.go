@@ -6,7 +6,6 @@ import (
 	"slices"
 )
 
-// Encode encodes Go data types into bencoded data.
 func Encode(data interface{}) ([]byte, error) {
 	switch v := data.(type) {
 	case int:
@@ -22,17 +21,14 @@ func Encode(data interface{}) ([]byte, error) {
 	}
 }
 
-// encodeInt encodes an integer into bencoded format.
 func encodeInt(i int) ([]byte, error) {
 	return []byte(fmt.Sprintf("i%de", i)), nil
 }
 
-// encodeString encodes a string into bencoded format.
 func encodeString(s string) ([]byte, error) {
 	return []byte(fmt.Sprintf("%d:%s", len(s), s)), nil
 }
 
-// encodeList encodes a list into bencoded format.
 func encodeList(l []interface{}) ([]byte, error) {
 	buf := bytes.NewBufferString("l")
 	for _, item := range l {
@@ -49,7 +45,6 @@ func encodeList(l []interface{}) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// encodeDict encodes a dictionary into bencoded format.
 func encodeDict(d map[string]interface{}) ([]byte, error) {
 	buf := bytes.NewBufferString("d")
 	keys := make([]string, 0, len(d))
@@ -57,7 +52,6 @@ func encodeDict(d map[string]interface{}) ([]byte, error) {
 		keys = append(keys, key)
 	}
 
-	// Sort keys alphabetically
 	slices.Sort(keys)
 
 	for _, key := range keys {

@@ -17,13 +17,15 @@ func TestEncodeInt(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		result, err := encodeInt(test.input)
-		if err != nil {
-			t.Errorf("unexpected error for input %d: %v", test.input, err)
-		}
-		if string(result) != test.expected {
-			t.Errorf("expected %s, got %s for input %d", test.expected, result, test.input)
-		}
+		t.Run(test.expected, func(t *testing.T) {
+			result, err := encodeInt(test.input)
+			if err != nil {
+				t.Errorf("unexpected error for input %d: %v", test.input, err)
+			}
+			if string(result) != test.expected {
+				t.Errorf("expected %s, got %s for input %d", test.expected, result, test.input)
+			}
+		})
 	}
 }
 
@@ -41,19 +43,21 @@ func TestEncodeString(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		result, err := encodeString(test.input)
-		if test.hasError {
-			if err == nil {
-				t.Errorf("expected error for input %s, but got none", test.input)
+		t.Run(test.expected, func(t *testing.T) {
+			result, err := encodeString(test.input)
+			if test.hasError {
+				if err == nil {
+					t.Errorf("expected error for input %s, but got none", test.input)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error for input %s: %v", test.input, err)
+				}
+				if string(result) != test.expected {
+					t.Errorf("expected %s, got %s for input %s", test.expected, result, test.input)
+				}
 			}
-		} else {
-			if err != nil {
-				t.Errorf("unexpected error for input %s: %v", test.input, err)
-			}
-			if string(result) != test.expected {
-				t.Errorf("expected %s, got %s for input %s", test.expected, result, test.input)
-			}
-		}
+		})
 	}
 }
 
@@ -71,19 +75,21 @@ func TestEncodeList(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		result, err := encodeList(test.input)
-		if test.hasError {
-			if err == nil {
-				t.Errorf("expected error for input %v, but got none", test.input)
+		t.Run(test.expected, func(t *testing.T) {
+			result, err := encodeList(test.input)
+			if test.hasError {
+				if err == nil {
+					t.Errorf("expected error for input %v, but got none", test.input)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error for input %v: %v", test.input, err)
+				}
+				if string(result) != test.expected {
+					t.Errorf("expected %s, got %s for input %v", test.expected, result, test.input)
+				}
 			}
-		} else {
-			if err != nil {
-				t.Errorf("unexpected error for input %v: %v", test.input, err)
-			}
-			if string(result) != test.expected {
-				t.Errorf("expected %s, got %s for input %v", test.expected, result, test.input)
-			}
-		}
+		})
 	}
 }
 
@@ -100,19 +106,21 @@ func TestEncodeDict(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		result, err := encodeDict(test.input)
-		if test.hasError {
-			if err == nil {
-				t.Errorf("expected error for input %v, but got none", test.input)
+		t.Run(test.expected, func(t *testing.T) {
+			result, err := encodeDict(test.input)
+			if test.hasError {
+				if err == nil {
+					t.Errorf("expected error for input %v, but got none", test.input)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error for input %v: %v", test.input, err)
+				}
+				if string(result) != test.expected {
+					t.Errorf("expected %s, got %s for input %v", test.expected, result, test.input)
+				}
 			}
-		} else {
-			if err != nil {
-				t.Errorf("unexpected error for input %v: %v", test.input, err)
-			}
-			if string(result) != test.expected {
-				t.Errorf("expected %s, got %s for input %v", test.expected, result, test.input)
-			}
-		}
+		})
 	}
 }
 
@@ -131,18 +139,20 @@ func TestEncode(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		result, err := Encode(test.input)
-		if test.hasError {
-			if err == nil {
-				t.Errorf("expected an error for input %v, but got none", test.input)
+		t.Run(test.expected, func(t *testing.T) {
+			result, err := Encode(test.input)
+			if test.hasError {
+				if err == nil {
+					t.Errorf("expected an error for input %v, but got none", test.input)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error for input %v: %v", test.input, err)
+				}
+				if string(result) != test.expected {
+					t.Errorf("expected %s, got %s for input %v", test.expected, result, test.input)
+				}
 			}
-		} else {
-			if err != nil {
-				t.Errorf("unexpected error for input %v: %v", test.input, err)
-			}
-			if string(result) != test.expected {
-				t.Errorf("expected %s, got %s for input %v", test.expected, result, test.input)
-			}
-		}
+		})
 	}
 }
