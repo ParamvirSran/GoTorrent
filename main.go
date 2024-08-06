@@ -6,40 +6,36 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 )
 
 func main() {
 	torrentPath := "mine.torrent"
 
-	// Parse the torrent file
 	torrentFile, err := ParseTorrentFile(torrentPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing torrent file (%s): %v\n", torrentPath, err)
 		os.Exit(1)
 	}
 
-	// Get the info hash from the torrent file
 	infoHash, err := GetInfoHash(torrentFile.Info)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error getting info hash: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Generate a peer ID
 	peerID, err := GeneratePeerID()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error generating peer ID: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Parse the announce URL
 	baseAnnounceURL, err := url.Parse(torrentFile.Announce)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error parsing announce URL: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Collect all tracker URLs
 	trackers := []string{baseAnnounceURL.String()}
 	for _, tier := range torrentFile.AnnounceList {
 		for _, t := range tier {
@@ -50,32 +46,27 @@ func main() {
 		}
 	}
 
-	// Iterate over all trackers
 	success := false
 	for _, trackerURL := range trackers {
 		fmt.Println("Trying tracker:", trackerURL)
 
-		// Parse the tracker URL
 		baseURL, err := url.Parse(trackerURL)
 		if err != nil {
 			fmt.Println("Error parsing URL:", err)
 			continue
 		}
 
-		// Create query parameters
 		params := url.Values{}
-		params.Add("info_hash", string(infoHash))
-		params.Add("downloaded", "0")
-		params.Add("event", "started")
-		params.Add("left", "262144")
-		params.Add("peer_id", peerID)
-		params.Add("port", "1337")
+		params.Add("info_hash", infoHash)
+		params.Add("peer_id", url.QueryEscape(peerID))
+		params.Add("port", "6881")
 		params.Add("uploaded", "0")
+		params.Add("downloaded", "0")
+		params.Add("left", strconv.Itoa(torrentFile.Info.Length))
+		params.Add("event", "started")
 
-		// Attach query parameters to the URL
 		baseURL.RawQuery = params.Encode()
 
-		// Make the GET request
 		response, err := http.Get(baseURL.String())
 		if err != nil {
 			fmt.Println("Error making GET request:", err)
@@ -83,14 +74,24 @@ func main() {
 		}
 		defer response.Body.Close()
 
-		// Read and print the response body
 		body, err := io.ReadAll(response.Body)
 		if err != nil {
 			fmt.Println("Error reading response body:", err)
 			continue
 		}
 
-		fmt.Println("Response:", string(body))
+		trackerResponse, err := ParseTrackerResponse(body)
+		if err != nil {
+			fmt.Println("Error parsing tracker response:", err)
+			continue
+		}
+
+		if failureReason, ok := trackerResponse["failure reason"].(string); ok {
+			fmt.Printf("Tracker response failure: %s\n", failureReason)
+			continue
+		}
+
+		fmt.Println("Tracker Response:", trackerResponse)
 		success = true
 		break
 	}

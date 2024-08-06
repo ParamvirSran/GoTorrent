@@ -19,8 +19,10 @@ func GetInfoHash(info Info) (string, error) {
 	infoMap["pieces"] = info.Pieces
 
 	if info.Length > 0 {
+		// Single-file case
 		infoMap["length"] = info.Length
 	} else {
+		// Multi-file case
 		var files []interface{}
 		for _, file := range info.Files {
 			pathInterfaceList := make([]interface{}, len(file.Path))
@@ -42,7 +44,7 @@ func GetInfoHash(info Info) (string, error) {
 	}
 
 	hash := sha1.Sum(encodedInfo)
-	return hex.EncodeToString(hash[:]), nil
+	return string(hash[:]), nil
 }
 
 func GeneratePeerID() (string, error) {
@@ -51,17 +53,16 @@ func GeneratePeerID() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("error generating random peer ID: %w", err)
 	}
-
 	prefix := "MYCLI"
 	peerID := prefix + hex.EncodeToString(random)[:20-len(prefix)]
 	return peerID, nil
 }
 
-func BuildAnnounceURL(infoHash, peerID, port string, uploaded, downloaded, left int, event string) string {
+func BuildAnnounceURL(baseURL, infoHash, peerID string, port, uploaded, downloaded, left int, event string) string {
 	params := url.Values{}
 	params.Add("info_hash", url.QueryEscape(infoHash))
 	params.Add("peer_id", url.QueryEscape(peerID))
-	params.Add("port", port)
+	params.Add("port", strconv.Itoa(port))
 	params.Add("uploaded", strconv.Itoa(uploaded))
 	params.Add("downloaded", strconv.Itoa(downloaded))
 	params.Add("left", strconv.Itoa(left))
@@ -70,31 +71,26 @@ func BuildAnnounceURL(infoHash, peerID, port string, uploaded, downloaded, left 
 		params.Add("event", event)
 	}
 
-	return fmt.Sprintf("%s", params.Encode())
+	return fmt.Sprintf("%s?%s", baseURL, params.Encode())
 }
 
-func SendGetRequest(url string) (io.Reader, error) {
-	fmt.Println(url)
+func SendGetRequest(url string) ([]byte, error) {
 	response, err := http.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("error sending GET request: %w", err)
 	}
 	defer response.Body.Close()
 
-	if response.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("tracker responded with status code: %d", response.StatusCode)
-	}
-
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, fmt.Errorf("error reading response body: %w", err)
 	}
 
-	return bytes.NewReader(body), nil
+	return body, nil
 }
 
-func ParseTrackerResponse(reader io.Reader) (map[string]interface{}, error) {
-	decoded, err := Decode(reader)
+func ParseTrackerResponse(response []byte) (map[string]interface{}, error) {
+	decoded, err := Decode(bytes.NewReader(response))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode tracker response: %w", err)
 	}
