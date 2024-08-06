@@ -2,11 +2,8 @@ package main
 
 import (
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 )
 
 func main() {
@@ -30,13 +27,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	baseAnnounceURL, err := url.Parse(torrentFile.Announce)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing announce URL: %v\n", err)
-		os.Exit(1)
-	}
+	uploaded := 0
+	downloaded := 0
+	left := torrentFile.Info.PieceLength
+	event := "started"
 
-	trackers := []string{baseAnnounceURL.String()}
+	trackers := []string{torrentFile.Announce}
 	for _, tier := range torrentFile.AnnounceList {
 		for _, t := range tier {
 			tURL, err := url.Parse(t)
@@ -49,40 +45,18 @@ func main() {
 	success := false
 	for _, trackerURL := range trackers {
 		fmt.Println("Trying tracker:", trackerURL)
-
-		baseURL, err := url.Parse(trackerURL)
+		requestURL, err := BuildAnnounceURL(trackerURL, infoHash, peerID, event, uploaded, downloaded, left)
 		if err != nil {
-			fmt.Println("Error parsing URL:", err)
 			continue
 		}
 
-		params := url.Values{}
-		params.Add("info_hash", infoHash)
-		params.Add("peer_id", url.QueryEscape(peerID))
-		params.Add("port", "6881")
-		params.Add("uploaded", "0")
-		params.Add("downloaded", "0")
-		params.Add("left", strconv.Itoa(torrentFile.Info.Length))
-		params.Add("event", "started")
-
-		baseURL.RawQuery = params.Encode()
-
-		response, err := http.Get(baseURL.String())
+		response, err := SendGetRequest(requestURL)
 		if err != nil {
-			fmt.Println("Error making GET request:", err)
-			continue
-		}
-		defer response.Body.Close()
-
-		body, err := io.ReadAll(response.Body)
-		if err != nil {
-			fmt.Println("Error reading response body:", err)
 			continue
 		}
 
-		trackerResponse, err := ParseTrackerResponse(body)
+		trackerResponse, err := ParseTrackerResponse(response)
 		if err != nil {
-			fmt.Println("Error parsing tracker response:", err)
 			continue
 		}
 

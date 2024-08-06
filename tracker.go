@@ -58,20 +58,23 @@ func GeneratePeerID() (string, error) {
 	return peerID, nil
 }
 
-func BuildAnnounceURL(baseURL, infoHash, peerID string, port, uploaded, downloaded, left int, event string) string {
+func BuildAnnounceURL(baseURL, infoHash, peerID, event string, uploaded, downloaded, left int) (string, error) {
+	trackerURL, err := url.Parse(baseURL)
+	if err != nil {
+		return "", err
+	}
+
 	params := url.Values{}
-	params.Add("info_hash", url.QueryEscape(infoHash))
-	params.Add("peer_id", url.QueryEscape(peerID))
-	params.Add("port", strconv.Itoa(port))
+	params.Add("info_hash", infoHash)
+	params.Add("peer_id", peerID)
+	params.Add("port", trackerURL.Port())
 	params.Add("uploaded", strconv.Itoa(uploaded))
 	params.Add("downloaded", strconv.Itoa(downloaded))
 	params.Add("left", strconv.Itoa(left))
+	params.Add("event", event)
 
-	if event != "" {
-		params.Add("event", event)
-	}
-
-	return fmt.Sprintf("%s?%s", baseURL, params.Encode())
+	trackerURL.RawQuery = params.Encode()
+	return trackerURL.String(), nil
 }
 
 func SendGetRequest(url string) ([]byte, error) {
