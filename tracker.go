@@ -71,7 +71,11 @@ func BuildAnnounceURL(baseURL, infoHash, peerID, event string, uploaded, downloa
 	params.Add("uploaded", strconv.Itoa(uploaded))
 	params.Add("downloaded", strconv.Itoa(downloaded))
 	params.Add("left", strconv.Itoa(left))
-	params.Add("event", event)
+	params.Add("compact", "1")
+
+	if event != "" {
+		params.Add("event", event)
+	}
 
 	trackerURL.RawQuery = params.Encode()
 	return trackerURL.String(), nil

@@ -50,26 +50,43 @@ func main() {
 			continue
 		}
 
-		response, err := SendGetRequest(requestURL)
+		resp, err := SendGetRequest(requestURL)
 		if err != nil {
+			fmt.Println("Error sending GET request:", err)
 			continue
 		}
 
-		trackerResponse, err := ParseTrackerResponse(response)
+		trackerResp, err := ParseTrackerResponse(resp)
 		if err != nil {
+			fmt.Println("Error parsing tracker response:", err)
 			continue
 		}
 
-		if failureReason, ok := trackerResponse["failure reason"].(string); ok {
-			fmt.Printf("Tracker response failure: %s\n", failureReason)
+		if fail, ok := trackerResp["failure reason"].(string); ok {
+			fmt.Println("Tracker response failure:", fail)
 			continue
 		}
+		fmt.Println(trackerResp)
+		var peerList []string
+		if peers, ok := trackerResp["peers"].(string); ok {
+			peerList, err = ParseCompactPeers([]byte(peers))
+			if err != nil {
+				fmt.Println("Error parsing compact peers:", err)
+				continue
+			}
+		} else if peers, ok := trackerResp["peers"].([]interface{}); ok {
+			peerList, err = ParseDictionaryPeers(peers)
+			if err != nil {
+				fmt.Println("Error parsing dictionary peers:", err)
+				continue
+			}
+		}
 
-		fmt.Println("Tracker Response:", trackerResponse)
+		fmt.Println("Peers:", peerList)
 		success = true
+		event = ""
 		break
 	}
-
 	if !success {
 		fmt.Println("Failed to get a valid response from any tracker.")
 	}
