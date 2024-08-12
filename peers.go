@@ -38,3 +38,18 @@ func ParseDictionaryPeers(peers []interface{}) ([]string, error) {
 	}
 	return peerList, nil
 }
+
+func extractPeers(trackerResp map[string]interface{}) ([]string, error) {
+	var peerList []string
+	var err error
+	if peers, ok := trackerResp["peers"].(string); ok {
+		peerList, err = ParseCompactPeers([]byte(peers))
+	} else if peers, ok := trackerResp["peers"].([]interface{}); ok {
+		peerList, err = ParseDictionaryPeers(peers)
+	}
+	return peerList, err
+}
+
+func handlePeerConnection(conn net.Conn, infoHash, peerID string) {
+	return
+}

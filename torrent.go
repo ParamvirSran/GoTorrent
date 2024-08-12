@@ -168,3 +168,17 @@ func ParseFile(fileDict map[string]interface{}) (File, error) {
 
 	return fileInfo, nil
 }
+
+func CalculateLeft(torrent *Metainfo, downloaded int) int {
+	if torrent.Info.Length > 0 {
+		return torrent.Info.Length - downloaded
+	} else {
+		sumFiles := 0
+		for _, file := range torrent.Info.Files {
+			sumFiles += file.Length
+		}
+		return sumFiles - downloaded
+	}
+}
+
+func CalculateDownloaded() { return }

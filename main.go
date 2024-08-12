@@ -2,92 +2,84 @@ package main
 
 import (
 	"fmt"
-	"net/url"
+	"log"
+	"net"
 	"os"
 )
 
-func main() {
-	torrentPath := "mine.torrent"
+const (
+	DefaultPort = 6881
+	StartEvent  = "started"
+)
 
+func main() {
+	if len(os.Args) < 2 {
+		log.Fatalf("Usage: %s <torrent-file>", os.Args[0])
+	}
+
+	torrentPath := os.Args[1]
 	torrentFile, err := ParseTorrentFile(torrentPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error parsing torrent file (%s): %v\n", torrentPath, err)
-		os.Exit(1)
+		log.Fatalf("Error parsing torrent file (%s): %v", torrentPath, err)
 	}
 
 	infoHash, err := GetInfoHash(torrentFile.Info)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error getting info hash: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Error getting info hash: %v", err)
 	}
 
 	peerID, err := GeneratePeerID()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error generating peer ID: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Error generating peer ID: %v", err)
 	}
 
-	uploaded := 0
-	downloaded := 0
-	left := torrentFile.Info.PieceLength
-	event := "started"
+	uploaded, downloaded := 0, 0
+	left := torrentFile.Info.PieceLength //TODO calculate correctly
+	port := DefaultPort
 
-	trackers := []string{torrentFile.Announce}
-	for _, tier := range torrentFile.AnnounceList {
-		for _, t := range tier {
-			tURL, err := url.Parse(t)
-			if err == nil && tURL.Scheme != "udp" {
-				trackers = append(trackers, tURL.String())
-			}
-		}
+	trackers := gatherTrackers(torrentFile)
+	if len(trackers) == 0 {
+		log.Fatal("No valid trackers found")
 	}
 
-	success := false
-	for _, trackerURL := range trackers {
-		fmt.Println("Trying tracker:", trackerURL)
-		requestURL, err := BuildAnnounceURL(trackerURL, infoHash, peerID, event, uploaded, downloaded, left)
-		if err != nil {
-			continue
-		}
+	peerList, err := contactTrackers(trackers, infoHash, peerID, StartEvent, uploaded, downloaded, left, port)
+	if err != nil {
+		log.Fatalf("Error contacting trackers: %v", err)
+	}
 
-		resp, err := SendGetRequest(requestURL)
-		if err != nil {
-			fmt.Println("Error sending GET request:", err)
-			continue
-		}
+	if len(peerList) == 0 {
+		log.Fatal("No peers found")
+	}
 
-		trackerResp, err := ParseTrackerResponse(resp)
-		if err != nil {
-			fmt.Println("Error parsing tracker response:", err)
-			continue
-		}
+	fmt.Println("Peers:", peerList)
 
-		if fail, ok := trackerResp["failure reason"].(string); ok {
-			fmt.Println("Tracker response failure:", fail)
-			continue
+	go func() {
+		listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
+		if err != nil {
+			log.Fatalf("Error listening on port %d: %v\n", port, err)
 		}
-		fmt.Println(trackerResp)
-		var peerList []string
-		if peers, ok := trackerResp["peers"].(string); ok {
-			peerList, err = ParseCompactPeers([]byte(peers))
+		defer listener.Close()
+
+		for {
+			conn, err := listener.Accept()
 			if err != nil {
-				fmt.Println("Error parsing compact peers:", err)
+				log.Printf("Failed to accept connection: %v\n", err)
 				continue
 			}
-		} else if peers, ok := trackerResp["peers"].([]interface{}); ok {
-			peerList, err = ParseDictionaryPeers(peers)
-			if err != nil {
-				fmt.Println("Error parsing dictionary peers:", err)
-				continue
-			}
+			go handlePeerConnection(conn, infoHash, peerID)
 		}
+	}()
 
-		fmt.Println("Peers:", peerList)
-		success = true
-		event = ""
-		break
+	for _, peerAddress := range peerList {
+		go func(peerAddress string) {
+			conn, err := net.Dial("tcp", peerAddress)
+			if err != nil {
+				log.Printf("Failed to connect to peer %s: %v\n", peerAddress, err)
+				return
+			}
+			handlePeerConnection(conn, infoHash, peerID)
+		}(peerAddress)
 	}
-	if !success {
-		fmt.Println("Failed to get a valid response from any tracker.")
-	}
+
+	select {}
 }

@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -58,7 +59,7 @@ func GeneratePeerID() (string, error) {
 	return peerID, nil
 }
 
-func BuildAnnounceURL(baseURL, infoHash, peerID, event string, uploaded, downloaded, left int) (string, error) {
+func BuildAnnounceURL(baseURL, infoHash, peerID, event string, uploaded, downloaded, left, port int) (string, error) {
 	trackerURL, err := url.Parse(baseURL)
 	if err != nil {
 		return "", err
@@ -67,7 +68,7 @@ func BuildAnnounceURL(baseURL, infoHash, peerID, event string, uploaded, downloa
 	params := url.Values{}
 	params.Add("info_hash", infoHash)
 	params.Add("peer_id", peerID)
-	params.Add("port", trackerURL.Port())
+	params.Add("port", strconv.Itoa(port))
 	params.Add("uploaded", strconv.Itoa(uploaded))
 	params.Add("downloaded", strconv.Itoa(downloaded))
 	params.Add("left", strconv.Itoa(left))
@@ -106,6 +107,65 @@ func ParseTrackerResponse(response []byte) (map[string]interface{}, error) {
 	if !ok {
 		return nil, fmt.Errorf("invalid tracker response format: expected dictionary but got %T", decoded)
 	}
-
+	if failReason, ok := trackerResponse["failure reason"].(string); ok {
+		return nil, fmt.Errorf(failReason)
+	}
 	return trackerResponse, nil
+}
+
+func gatherTrackers(torrentFile *Metainfo) []string {
+	trackers := []string{torrentFile.Announce}
+	for _, tier := range torrentFile.AnnounceList {
+		for _, t := range tier {
+			tURL, err := url.Parse(t)
+			if err == nil && tURL.Scheme != "udp" {
+				trackers = append(trackers, tURL.String())
+			}
+		}
+	}
+	return trackers
+}
+
+func contactTrackers(trackers []string, infoHash, peerID, event string, uploaded, downloaded, left, port int) ([]string, error) {
+	var peerList []string
+	for _, trackerURL := range trackers {
+		fmt.Println("Trying tracker:", trackerURL)
+		peers, err := contactTracker(trackerURL, infoHash, peerID, event, uploaded, downloaded, left, port)
+		if err != nil {
+			log.Printf("Error contacting tracker %s: %v", trackerURL, err)
+			continue
+		}
+		if len(peers) > 0 {
+			peerList = append(peerList, peers...)
+			event = "" // After the first successful announce, the event should be empty
+		}
+	}
+	if len(peerList) == 0 {
+		return nil, fmt.Errorf("no valid peers found from any tracker")
+	}
+	return peerList, nil
+}
+
+func contactTracker(trackerURL, infoHash, peerID, event string, uploaded, downloaded, left, port int) ([]string, error) {
+	requestURL, err := BuildAnnounceURL(trackerURL, infoHash, peerID, event, uploaded, downloaded, left, port)
+	if err != nil {
+		return nil, fmt.Errorf("error building announce URL: %w", err)
+	}
+
+	resp, err := SendGetRequest(requestURL)
+	if err != nil {
+		return nil, fmt.Errorf("error sending GET request: %w", err)
+	}
+
+	trackerResp, err := ParseTrackerResponse(resp)
+	if err != nil {
+		return nil, fmt.Errorf("error parsing tracker response: %w", err)
+	}
+
+	peerList, err := extractPeers(trackerResp)
+	if err != nil {
+		return nil, fmt.Errorf("error extracting peers: %w", err)
+	}
+
+	return peerList, nil
 }
