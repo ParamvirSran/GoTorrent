@@ -5,6 +5,16 @@ import (
 	"net"
 )
 
+type Peer struct {
+}
+
+type PeerState struct {
+	am_choking      bool
+	am_interested   bool
+	peer_choking    bool
+	peer_interested bool
+}
+
 func ParseCompactPeers(peers []byte) ([]string, error) {
 	if len(peers)%6 != 0 {
 		return nil, fmt.Errorf("invalid compact peers length")
