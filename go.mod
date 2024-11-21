@@ -1,3 +1,3 @@
-module github.com/ParamvirSran/torrent-cli
+module github.com/ParamvirSran/GoTorrent
 
-go 1.23
+go 1.24
