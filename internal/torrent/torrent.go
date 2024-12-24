@@ -3,7 +3,7 @@ package torrent
 import (
 	"bytes"
 	"fmt"
-	"github.com/ParamvirSran/GoTorrent/internal/decode"
+	"github.com/ParamvirSran/GoTorrent/internal/bencode"
 	"os"
 )
 
@@ -32,7 +32,7 @@ func ParseTorrentFile(torrentPath string) (*Metainfo, error) {
 		return nil, fmt.Errorf("error reading .torrent file: %v", err)
 	}
 
-	data, err := decode.Decode(bytes.NewReader(content))
+	data, err := bencode.Decode(bytes.NewReader(content))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode torrent file: %w", err)
 	}
@@ -42,7 +42,8 @@ func ParseTorrentFile(torrentPath string) (*Metainfo, error) {
 		return nil, fmt.Errorf("invalid torrent file format: expected a dictionary but got %T", data)
 	}
 
-	return parseMetainfo(torrentDict)
+	parsed_file, err := parseMetainfo(torrentDict)
+	return parsed_file, err
 }
 
 func parseMetainfo(torrentDict map[string]interface{}) (*Metainfo, error) {

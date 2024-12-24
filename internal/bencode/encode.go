@@ -1,4 +1,4 @@
-package encode
+package bencode
 
 import (
 	"bytes"

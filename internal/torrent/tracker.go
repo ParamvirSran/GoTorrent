@@ -6,8 +6,8 @@ import (
 	"crypto/sha1"
 	"encoding/hex"
 	"fmt"
-	"github.com/ParamvirSran/GoTorrent/internal/decode"
-	"github.com/ParamvirSran/GoTorrent/internal/encode"
+	"github.com/ParamvirSran/GoTorrent/internal/bencode"
+	"github.com/ParamvirSran/GoTorrent/internal/peers"
 	"io"
 	"log"
 	"net/http"
@@ -41,7 +41,7 @@ func GetInfoHash(info Info) (string, error) {
 		infoMap["files"] = files
 	}
 
-	encodedInfo, err := encode.Encode(infoMap)
+	encodedInfo, err := bencode.Encode(infoMap)
 	if err != nil {
 		return "", fmt.Errorf("failed to encode info dictionary: %w", err)
 	}
@@ -100,7 +100,7 @@ func SendGetRequest(url string) ([]byte, error) {
 }
 
 func ParseTrackerResponse(response []byte) (map[string]interface{}, error) {
-	decoded, err := decode.Decode(bytes.NewReader(response))
+	decoded, err := bencode.Decode(bytes.NewReader(response))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode tracker response: %w", err)
 	}
@@ -164,7 +164,7 @@ func contactTracker(trackerURL, infoHash, peerID, event string, uploaded, downlo
 		return nil, fmt.Errorf("error parsing tracker response: %w", err)
 	}
 
-	peerList, err := ExtractPeers(trackerResp)
+	peerList, err := peers.ExtractPeers(trackerResp)
 	if err != nil {
 		return nil, fmt.Errorf("error extracting peers: %w", err)
 	}

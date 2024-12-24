@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/ParamvirSran/GoTorrent/internal/peers"
 	"github.com/ParamvirSran/GoTorrent/internal/torrent"
 	"log"
 	"net"
@@ -67,7 +68,7 @@ func main() {
 				log.Printf("Failed to accept connection: %v\n", err)
 				continue
 			}
-			go torrent.HandlePeerConnection(conn, infoHash, peerID)
+			go peers.HandlePeerConnection(conn, infoHash, peerID)
 		}
 	}()
 
@@ -78,7 +79,7 @@ func main() {
 				log.Printf("Failed to connect to peer %s: %v\n", peerAddress, err)
 				return
 			}
-			torrent.HandlePeerConnection(conn, infoHash, peerID)
+			peers.HandlePeerConnection(conn, infoHash, peerID)
 		}(peerAddress)
 	}
 
