@@ -6,6 +6,7 @@ import (
 )
 
 type Peer struct {
+	state PeerState
 }
 
 type PeerState struct {
