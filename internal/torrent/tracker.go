@@ -209,7 +209,6 @@ func extractPeersFromTracker(trackerURL, infoHash, peerID, event string, uploade
 func ContactTrackers(trackers []string, infoHash, peerID, event string, uploaded, downloaded, left, port int) ([]string, error) {
 	var peerList []string
 	for _, trackerURL := range trackers {
-		fmt.Println("Trying tracker:", trackerURL)
 		peers, err := extractPeersFromTracker(trackerURL, infoHash, peerID, event, uploaded, downloaded, left, port)
 		if err != nil {
 			log.Printf("Error contacting tracker %s: %v", trackerURL, err)
@@ -239,4 +238,3 @@ func GatherTrackers(torrentFile *TorrentFile) []string {
 	}
 	return trackers
 }
-

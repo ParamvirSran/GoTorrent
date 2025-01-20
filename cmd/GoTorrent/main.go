@@ -1,14 +1,15 @@
 package main
 
 import (
-	"fmt"
+	"log"
+	"os"
+
 	"github.com/ParamvirSran/GoTorrent/internal/peers"
 	"github.com/ParamvirSran/GoTorrent/internal/torrent"
-	"log"
-	"net"
-	"os"
-	"time"
+	"github.com/ParamvirSran/GoTorrent/internal/utils"
 )
+
+var debugMode = false
 
 const (
 	DefaultPort = 6881
@@ -25,14 +26,8 @@ func main() {
 	// gather trackers and get peers
 	peerList := getPeers(torrentFile, infoHash, peerID)
 
-	// Start listening for incoming peer connections
-	go startPeerListener(DefaultPort, infoHash, peerID)
-
 	// Connect to discovered peers and begin downloading/uploading
 	connectToPeers(peerList, infoHash, peerID)
-
-	// Start downloading the torrent (track progress, request pieces)
-	trackAndDownload(torrentFile, infoHash, peerID)
 
 	select {}
 }
@@ -41,6 +36,9 @@ func main() {
 func parseArgs() string {
 	if len(os.Args) < 2 {
 		log.Fatalf("Usage: %s <torrent-file>", os.Args[0])
+	}
+	if os.Getenv("DEBUG") == "1" {
+		debugMode = true
 	}
 	return os.Args[1]
 }
@@ -82,40 +80,15 @@ func getPeers(torrentFile *torrent.TorrentFile, infoHash []byte, peerID []byte) 
 		log.Fatal("No peers found")
 	}
 
-	fmt.Println("Peers:", peerList)
+	utils.DebugLog(debugMode, "Peers:", peerList)
 	return peerList
-}
-
-// startPeerListener starts a listener to handle incoming connections from peers
-func startPeerListener(port int, infoHash []byte, peerID []byte) {
-	listener, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
-	if err != nil {
-		log.Fatalf("Error listening on port %d: %v\n", port, err)
-	}
-	defer listener.Close()
-
-	log.Printf("Listening for peer connections on port %d\n", port)
-
-	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			log.Printf("Failed to accept connection: %v\n", err)
-			continue
-		}
-		go peers.HandlePeerConnection(conn, string(infoHash), string(peerID))
-	}
 }
 
 // connectToPeers establishes connections to each peer in the peer list
 func connectToPeers(peerList []string, infoHash []byte, peerID []byte) {
 	for _, peerAddress := range peerList {
 		go func(peerAddress string) {
-			conn, err := net.Dial("tcp", peerAddress)
-			if err != nil {
-				log.Printf("Failed to connect to peer %s: %v\n", peerAddress, err)
-				return
-			}
-			peers.HandlePeerConnection(conn, string(infoHash), string(peerID))
+			peers.HandlePeerConnection(infoHash, peerID, peerAddress)
 		}(peerAddress)
 	}
 }
@@ -124,25 +97,6 @@ func connectToPeers(peerList []string, infoHash []byte, peerID []byte) {
 func trackAndDownload(torrentFile *torrent.TorrentFile, infoHash []byte, peerID []byte) {
 	// Assuming pieces are split into chunks; tracking missing pieces
 	totalPieces := len(torrentFile.Info.Pieces) / 20 // Adjust accordingly
-	pieces := make([]bool, totalPieces)
-
-	// Example piece download progress
-	for i := 0; i < totalPieces; i++ {
-		if !pieces[i] {
-			// Download this piece (simulated with sleep for now)
-			fmt.Printf("Downloading piece %d...\n", i)
-			time.Sleep(time.Second) // Simulate download
-			pieces[i] = true
-			fmt.Printf("Downloaded piece %d\n", i)
-		}
-	}
-
-	// Check download status and report progress
-	downloadedPieces := 0
-	for _, piece := range pieces {
-		if piece {
-			downloadedPieces++
-		}
-	}
-	fmt.Printf("Download progress: %d/%d pieces\n", downloadedPieces, totalPieces)
+	utils.DebugLog(debugMode, "", +totalPieces)
+	return
 }
