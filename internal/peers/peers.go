@@ -1,6 +1,7 @@
 package peers
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"log"
@@ -104,10 +105,27 @@ func UpdatePeerState(peer *Peer, receivedInterested bool, receivedChoking bool) 
 	// Further logic can be added to make the peer interested or disinterested based on available blocks
 }
 
-func createHandshake(infohash []byte, peer_id []byte) []byte {
-	buf := make([]byte, 4)
-	binary.BigEndian.PutUint32(buf, uint32(PROTOCOL_LENGTH)) // integers are in big endian
-	pstrlen := buf
+func decodeInteger(data []byte) int32 {
+	var value int32
+	buf := bytes.NewReader(data)
+	err := binary.Read(buf, binary.BigEndian, &value)
+	if err != nil {
+		fmt.Println("Error decoding integer:", err)
+	}
+	return value
+}
+
+func encodeInteger(value int32) []byte {
+	buf := new(bytes.Buffer)
+	err := binary.Write(buf, binary.BigEndian, value)
+	if err != nil {
+		fmt.Println("Error encoding integer:", err)
+	}
+	return buf.Bytes()
+}
+
+func createHandshake(infohash []byte, peer_id []byte) ([]byte, error) {
+	pstrlen := encodeInteger(int32(PROTOCOL_LENGTH))
 	pstr := []byte(PROTOCOL_STRING)
 	reserved := []byte(RESERVED_BITS)
 
@@ -116,7 +134,10 @@ func createHandshake(infohash []byte, peer_id []byte) []byte {
 	handshake = append(handshake, infohash...)
 	handshake = append(handshake, peer_id...)
 
-	return handshake
+	if len(handshake) != 68 {
+		return nil, fmt.Errorf("handshake is length %d, expect 68", len(handshake))
+	}
+	return handshake, nil
 }
 
 // HandlePeerConnection will handle individual peer connections
@@ -139,7 +160,10 @@ func HandlePeerConnection(infoHash []byte, peerID []byte, peerAddress string) {
 	log.Printf("Connected to peer %s:%s", peerIP, peerPort)
 
 	// Send handshake
-	handshake := createHandshake(infoHash, peerID)
+	handshake, err := createHandshake(infoHash, peerID)
+	if err != nil {
+		return
+	}
 	_, err = conn.Write(handshake)
 	if err != nil {
 		log.Printf("Error sending handshake to peer %s: %v", peerAddress, err)
