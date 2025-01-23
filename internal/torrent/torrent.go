@@ -261,15 +261,6 @@ func parseFile(fileDict map[string]interface{}) (File, error) {
 	return fileInfo, nil
 }
 
-// VerifyPiece verifies the downloaded piece against its expected hash
-func VerifyPiece(piece []byte, expectedHash []byte) (bool, error) {
-	if len(expectedHash) != sha1.Size {
-		return false, fmt.Errorf("invalid hash length: expected %d bytes, got %d", sha1.Size, len(expectedHash))
-	}
-	hash := sha1.Sum(piece)
-	return bytes.Equal(hash[:], expectedHash), nil
-}
-
 // ValidatePieceLength checks if the piece length is within valid bounds
 func ValidatePieceLength(pieceLength int) error {
 	if pieceLength < MinPieceLength || pieceLength > MaxPieceLength {

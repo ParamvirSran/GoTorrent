@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-const PROTOCOL_LENGTH = 19
 const PROTOCOL_STRING = "BitTorrent protocol"
-const RESERVED_BITS = "00000000"
+const PROTOCOL_LENGTH = len(PROTOCOL_STRING)
+const RESERVED_BITS = "\x00\x00\x00\x00\x00\x00\x00\x00"
 
 type Peer struct {
 	peer_state PeerState
@@ -124,12 +124,12 @@ func encodeInteger(value int32) []byte {
 }
 
 // HandlePeerConnection handles individual peer connections
-func HandlePeerConnection(infoHash []byte, peerID []byte, peerAddress string) {
+func HandlePeerConnection(infoHash []byte, peerID []byte, peerAddress string) error {
 	// Extract IP and port from the peer address
 	peerIP, peerPort, err := net.SplitHostPort(peerAddress)
 	if err != nil {
 		log.Printf("Error parsing peer address %s: %v", peerAddress, err)
-		return
+		return err
 	}
 
 	log.Printf("Attempting connection to peer %s:%s", peerIP, peerPort)
@@ -138,7 +138,7 @@ func HandlePeerConnection(infoHash []byte, peerID []byte, peerAddress string) {
 	conn, err := net.DialTimeout("tcp", peerAddress, 10*time.Second)
 	if err != nil {
 		log.Printf("Error connecting to peer %s: %v", peerAddress, err)
-		return
+		return err
 	}
 	defer conn.Close()
 
@@ -148,12 +148,12 @@ func HandlePeerConnection(infoHash []byte, peerID []byte, peerAddress string) {
 	handshake, err := createHandshake(infoHash, peerID)
 	if err != nil {
 		log.Printf("Error creating handshake: %v", err)
-		return
+		return err
 	}
 	_, err = conn.Write(handshake)
 	if err != nil {
 		log.Printf("Error sending handshake to peer %s: %v", peerAddress, err)
-		return
+		return err
 	}
 
 	// Read the handshake response from the peer
@@ -161,18 +161,19 @@ func HandlePeerConnection(infoHash []byte, peerID []byte, peerAddress string) {
 	_, err = conn.Read(response)
 	if err != nil {
 		log.Printf("Error reading handshake response from peer %s: %v", peerAddress, err)
-		return
+		return err
 	}
 
 	// Process the response (check protocol, infohash, peer id match)
 	if string(response[1:20]) != PROTOCOL_STRING {
 		log.Printf("Invalid protocol from peer %s", peerAddress)
-		return
+		return err
 	}
 	if string(response[28:48]) != string(infoHash) {
 		log.Printf("Invalid infohash from peer %s", peerAddress)
-		return
+		return err
 	}
 
 	log.Printf("Handshake successful with peer %s", peerAddress)
+	return nil
 }

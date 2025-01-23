@@ -1,9 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"log"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 
 	"github.com/ParamvirSran/GoTorrent/internal/peers"
 	"github.com/ParamvirSran/GoTorrent/internal/torrent"
@@ -19,19 +22,38 @@ const (
 )
 
 func main() {
-	// parse command-line arguments
+	// Parse command-line arguments
 	torrentPath := parseArgs()
 
-	// parse .torrent file and initialize download parameters
+	// Parse .torrent file and initialize download parameters
 	torrentFile, infoHash, peerID := initializeTorrent(torrentPath)
 
-	// gather trackers and get peers
+	// Gather trackers and get peers
 	peerList := getPeers(torrentFile, infoHash, peerID)
 
-	// Connect to discovered peers and begin downloading/uploading
-	connectToPeers(peerList, infoHash, peerID)
+	// Channel to monitor peer status
+	peerStatusChan := make(chan string, len(peerList))
+	go connectToPeers(peerList, infoHash, peerID, peerStatusChan)
+	go func() {
+		for status := range peerStatusChan {
+			log.Println("Peer status:", status)
+		}
+	}()
 
-	select {}
+	// Signal channel for graceful shutdown
+	signalChan := make(chan os.Signal, 1)
+	done := make(chan bool, 1)
+	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
+
+	go func() {
+		<-signalChan
+		log.Println("Received termination signal")
+		gracefulShutdown()
+		done <- true
+	}()
+
+	<-done
+	log.Println("Program terminated successfully")
 }
 
 // parseArgs handles command-line argument parsing and validation
@@ -89,30 +111,116 @@ func getPeers(torrentFile *torrent.Torrent, infoHash []byte, peerID []byte) []st
 	return peerList
 }
 
-// connectToPeers establishes connections to each peer in the peer list
-func connectToPeers(peerList []string, infoHash []byte, peerID []byte) {
+// connectToPeers establishes connections to each peer in the peer list concurrently
+func connectToPeers(peerList []string, infoHash []byte, peerID []byte, peerStatusChan chan string) {
 	var wg sync.WaitGroup
 
 	for _, peerAddress := range peerList {
-		wg.Add(1) // Add to the WaitGroup for each peer
+		wg.Add(1)
 		go func(peerAddress string) {
-			defer wg.Done() // Signal that this goroutine is done when it finishes
-			peers.HandlePeerConnection(infoHash, peerID, peerAddress)
+			defer wg.Done()
+			err := peers.HandlePeerConnection(infoHash, peerID, peerAddress)
+			if err != nil {
+				peerStatusChan <- "Failed: " + peerAddress + " - " + err.Error()
+			} else {
+				peerStatusChan <- "Connected: " + peerAddress
+			}
 		}(peerAddress)
 	}
 
-	wg.Wait() // Wait for all the goroutines to finish before proceeding
+	go func() {
+		wg.Wait()
+		close(peerStatusChan)
+	}()
 }
 
-// trackAndDownload tracks the download progress, requesting and storing pieces
+// trackAndDownload manages the downloading process
 func trackAndDownload(torrentFile *torrent.Torrent, infoHash []byte, peerID []byte) {
 	pieceHashes := torrentFile.Info.SplitPieces()
 	totalPieces := len(pieceHashes)
-	downloadedPieces := make([]bool, totalPieces) // Track which pieces are downloaded
-	pieceData := make([][]byte, totalPieces)      // Store downloaded piece data
-	utils.DebugLog(debugMode, "piece hashes:", pieceHashes)
-	utils.DebugLog(debugMode, "total pieces", totalPieces)
-	utils.DebugLog(debugMode, "downloaded pieces", downloadedPieces)
-	utils.DebugLog(debugMode, "piece data", pieceData)
+	downloadedPieces := make([]bool, totalPieces)
+	pieceData := make([][]byte, totalPieces)
+
+	utils.DebugLog(debugMode, "Piece hashes:", pieceHashes)
+	utils.DebugLog(debugMode, "Total pieces:", totalPieces)
+
+	// Concurrently request pieces from available peers
+	var wg sync.WaitGroup
+	for i := 0; i < totalPieces; i++ {
+		if !downloadedPieces[i] {
+			wg.Add(1)
+			go func(pieceIndex int) {
+				defer wg.Done()
+				err := requestPiece(infoHash, peerID, pieceIndex)
+				if err != nil {
+					log.Printf("Failed to request piece %d: %v", pieceIndex, err)
+					return
+				}
+				// Simulate piece download completion and mark it as downloaded
+				downloadedPieces[pieceIndex] = true
+				// Once a piece is downloaded, verify its hash
+				err = verifyPiece(pieceData[pieceIndex], pieceHashes[pieceIndex])
+				if err != nil {
+					log.Printf("Piece %d failed verification: %v", pieceIndex, err)
+					// If the piece fails verification, we may need to request it again
+					downloadedPieces[pieceIndex] = false
+				} else {
+					log.Printf("Piece %d downloaded and verified successfully", pieceIndex)
+				}
+			}(i)
+		}
+	}
+	wg.Wait()
 }
 
+// verifyPiece verifies a downloaded piece using the piece's hash
+func verifyPiece(pieceData []byte, expectedHash []byte) error {
+	// Verify the piece's integrity by comparing its hash with the expected hash
+	hash := utils.CalculateSHA1(pieceData)
+	if !utils.CompareHashes(hash, expectedHash) {
+		return fmt.Errorf("hash mismatch")
+	}
+	return nil
+}
+
+// requestPiece simulates requesting a piece from a peer
+func requestPiece(infoHash []byte, peerID []byte, pieceIndex int) error {
+	// Implement communication with peers here. For example:
+	// - Send a "Request" message for the piece.
+	// - Handle incoming "Piece" messages from peers.
+	// This function would involve network communication with peer(s), but let's simulate here:
+	log.Printf("Requesting piece %d from peer", pieceIndex)
+
+	// Simulate receiving piece data
+	pieceData := []byte("dummy piece data") // Replace with actual piece data from peer
+	fmt.Println(pieceData)
+
+	// Store the downloaded piece data
+	// You may want to append this to a global slice or write it to a file.
+	log.Printf("Received piece %d", pieceIndex)
+
+	// In real implementation, this is where you would save the piece data.
+	// For simplicity, we're just logging it here.
+	return nil
+}
+
+// gracefulShutdown handles program termination
+func gracefulShutdown() {
+	log.Println("Shutting down gracefully...")
+
+	// Clean up resources such as peer connections, file writes, etc.
+	err := cleanupResources()
+	if err != nil {
+		log.Printf("Error during shutdown: %v", err)
+	}
+
+	log.Println("Graceful shutdown complete.")
+	os.Exit(0)
+}
+
+// cleanupResources handles cleanup operations
+func cleanupResources() error {
+	// Close any open peer connections, stop ongoing downloads, etc.
+	// You can add a close operation here for connections, files, etc.
+	return nil
+}
