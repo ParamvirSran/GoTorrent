@@ -8,3 +8,7 @@ func DebugLog(debugMode bool, format string, v ...interface{}) {
 		log.Printf("[DEBUG] "+format, v...)
 	}
 }
+
+func logError(message string, args ...interface{}) {
+	log.Printf(message, args...)
+}

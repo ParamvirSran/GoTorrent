@@ -119,7 +119,7 @@ func BuildAnnounceURL(baseURL, infoHash, peerID, event string, uploaded, downloa
 	addQueryParam(params, "uploaded", strconv.Itoa(uploaded))
 	addQueryParam(params, "downloaded", strconv.Itoa(downloaded))
 	addQueryParam(params, "left", strconv.Itoa(left))
-	params.Add(CompactParam, "1") // request compact peer list
+	params.Add(CompactParam, "0") // request compact peer list
 
 	if event != "" {
 		addQueryParam(params, "event", event)

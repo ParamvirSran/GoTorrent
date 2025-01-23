@@ -281,7 +281,12 @@ func ValidatePieceLength(pieceLength int) error {
 func (info *InfoDictionary) SplitPieces() [][]byte {
 	var pieces [][]byte
 	for i := 0; i < len(info.Pieces); i += sha1.Size {
-		pieces = append(pieces, info.Pieces[i:i+sha1.Size])
+		// Ensure that the last piece is included even if it's smaller than sha1.Size
+		end := i + sha1.Size
+		if end > len(info.Pieces) {
+			end = len(info.Pieces)
+		}
+		pieces = append(pieces, info.Pieces[i:end])
 	}
 	return pieces
 }

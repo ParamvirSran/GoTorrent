@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"os"
+	"sync"
 
 	"github.com/ParamvirSran/GoTorrent/internal/peers"
 	"github.com/ParamvirSran/GoTorrent/internal/torrent"
@@ -90,11 +91,17 @@ func getPeers(torrentFile *torrent.Torrent, infoHash []byte, peerID []byte) []st
 
 // connectToPeers establishes connections to each peer in the peer list
 func connectToPeers(peerList []string, infoHash []byte, peerID []byte) {
+	var wg sync.WaitGroup
+
 	for _, peerAddress := range peerList {
+		wg.Add(1) // Add to the WaitGroup for each peer
 		go func(peerAddress string) {
+			defer wg.Done() // Signal that this goroutine is done when it finishes
 			peers.HandlePeerConnection(infoHash, peerID, peerAddress)
 		}(peerAddress)
 	}
+
+	wg.Wait() // Wait for all the goroutines to finish before proceeding
 }
 
 // trackAndDownload tracks the download progress, requesting and storing pieces
@@ -103,27 +110,9 @@ func trackAndDownload(torrentFile *torrent.Torrent, infoHash []byte, peerID []by
 	totalPieces := len(pieceHashes)
 	downloadedPieces := make([]bool, totalPieces) // Track which pieces are downloaded
 	pieceData := make([][]byte, totalPieces)      // Store downloaded piece data
-
-	for i, hash := range pieceHashes {
-		go func(index int, expectedHash []byte) {
-			// Request the piece from peers
-			piece, err := peers.RequestPiece(index, torrentFile.Info.PieceLength)
-			if err != nil {
-				utils.DebugLog(debugMode, "Failed to download piece:", index, err)
-				return
-			}
-
-			// Verify piece hash
-			isValid, err := torrent.VerifyPiece(piece, expectedHash)
-			if err != nil || !isValid {
-				utils.DebugLog(debugMode, "Piece verification failed for:", index)
-				return
-			}
-
-			// Save piece data
-			downloadedPieces[index] = true
-			pieceData[index] = piece
-			utils.DebugLog(debugMode, "Downloaded piece:", index)
-		}(i, hash)
-	}
+	utils.DebugLog(debugMode, "piece hashes:", pieceHashes)
+	utils.DebugLog(debugMode, "total pieces", totalPieces)
+	utils.DebugLog(debugMode, "downloaded pieces", downloadedPieces)
+	utils.DebugLog(debugMode, "piece data", pieceData)
 }
+
