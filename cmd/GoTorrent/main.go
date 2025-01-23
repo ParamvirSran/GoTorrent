@@ -14,6 +14,7 @@ var debugMode = false
 const (
 	DefaultPort = 6881
 	StartEvent  = "started"
+	SHA1Size    = 20
 )
 
 func main() {
@@ -44,7 +45,7 @@ func parseArgs() string {
 }
 
 // initializeTorrent parses and sets up the torrent download process
-func initializeTorrent(torrentPath string) (*torrent.TorrentFile, []byte, []byte) {
+func initializeTorrent(torrentPath string) (*torrent.Torrent, []byte, []byte) {
 	torrentFile, err := torrent.ParseTorrentFile(torrentPath)
 	if err != nil {
 		log.Fatalf("Error parsing torrent file (%s): %v", torrentPath, err)
@@ -64,13 +65,16 @@ func initializeTorrent(torrentPath string) (*torrent.TorrentFile, []byte, []byte
 }
 
 // getPeers returns the compact peer list from the tracker
-func getPeers(torrentFile *torrent.TorrentFile, infoHash []byte, peerID []byte) []string {
+func getPeers(torrentFile *torrent.Torrent, infoHash []byte, peerID []byte) []string {
 	trackers := torrent.GatherTrackers(torrentFile)
 	if len(trackers) == 0 {
 		log.Fatal("No valid trackers found")
 	}
 
-	uploaded, downloaded, left := 0, 0, torrentFile.Info.PieceLength // TODO: calculate left properly
+	uploaded, downloaded := 0, 0
+	left := int(torrentFile.Info.Length) - downloaded
+	utils.DebugLog(debugMode, "Left:", left)
+
 	peerList, err := torrent.ContactTrackers(trackers, string(infoHash), string(peerID), StartEvent, uploaded, downloaded, left, DefaultPort)
 	if err != nil {
 		log.Fatalf("Error contacting trackers: %v", err)
@@ -94,9 +98,32 @@ func connectToPeers(peerList []string, infoHash []byte, peerID []byte) {
 }
 
 // trackAndDownload tracks the download progress, requesting and storing pieces
-func trackAndDownload(torrentFile *torrent.TorrentFile, infoHash []byte, peerID []byte) {
-	// Assuming pieces are split into chunks; tracking missing pieces
-	totalPieces := len(torrentFile.Info.Pieces) / 20 // Adjust accordingly
-	utils.DebugLog(debugMode, "", +totalPieces)
-	return
+func trackAndDownload(torrentFile *torrent.Torrent, infoHash []byte, peerID []byte) {
+	pieceHashes := torrentFile.Info.SplitPieces()
+	totalPieces := len(pieceHashes)
+	downloadedPieces := make([]bool, totalPieces) // Track which pieces are downloaded
+	pieceData := make([][]byte, totalPieces)      // Store downloaded piece data
+
+	for i, hash := range pieceHashes {
+		go func(index int, expectedHash []byte) {
+			// Request the piece from peers
+			piece, err := peers.RequestPiece(index, torrentFile.Info.PieceLength)
+			if err != nil {
+				utils.DebugLog(debugMode, "Failed to download piece:", index, err)
+				return
+			}
+
+			// Verify piece hash
+			isValid, err := torrent.VerifyPiece(piece, expectedHash)
+			if err != nil || !isValid {
+				utils.DebugLog(debugMode, "Piece verification failed for:", index)
+				return
+			}
+
+			// Save piece data
+			downloadedPieces[index] = true
+			pieceData[index] = piece
+			utils.DebugLog(debugMode, "Downloaded piece:", index)
+		}(i, hash)
+	}
 }

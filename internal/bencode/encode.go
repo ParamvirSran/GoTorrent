@@ -6,12 +6,17 @@ import (
 	"slices"
 )
 
+// Encode serializes data into a bencoded format
 func Encode(data interface{}) ([]byte, error) {
 	switch v := data.(type) {
+	case int64:
+		return encodeInt(int(v))
 	case int:
 		return encodeInt(v)
 	case string:
 		return encodeString(v)
+	case []byte:
+		return encodeString(string(v)) // Treat []byte as string for bencoding
 	case []interface{}:
 		return encodeList(v)
 	case map[string]interface{}:
@@ -21,14 +26,17 @@ func Encode(data interface{}) ([]byte, error) {
 	}
 }
 
+// encodeInt serializes an integer into bencoded format
 func encodeInt(i int) ([]byte, error) {
 	return []byte(fmt.Sprintf("i%de", i)), nil
 }
 
+// encodeString serializes a string into bencoded format
 func encodeString(s string) ([]byte, error) {
 	return []byte(fmt.Sprintf("%d:%s", len(s), s)), nil
 }
 
+// encodeList serializes a list of items into bencoded format
 func encodeList(l []interface{}) ([]byte, error) {
 	buf := bytes.NewBufferString("l")
 	for _, item := range l {
@@ -45,6 +53,7 @@ func encodeList(l []interface{}) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// encodeDict serializes a dictionary into bencoded format
 func encodeDict(d map[string]interface{}) ([]byte, error) {
 	buf := bytes.NewBufferString("d")
 	keys := make([]string, 0, len(d))
@@ -74,3 +83,4 @@ func encodeDict(d map[string]interface{}) ([]byte, error) {
 	buf.WriteString("e")
 	return buf.Bytes(), nil
 }
+

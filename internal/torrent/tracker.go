@@ -61,11 +61,11 @@ func GeneratePeerID() (string, error) {
 }
 
 // GetInfoHash calculates the SHA-1 hash of the bencoded "info" dictionary
-func GetInfoHash(info Info) ([]byte, error) {
+func GetInfoHash(info InfoDictionary) ([]byte, error) {
 	infoMap := make(map[string]interface{})
 	infoMap["name"] = info.Name
 	infoMap["piece length"] = info.PieceLength
-	infoMap["pieces"] = info.Pieces
+	infoMap["pieces"] = string(info.Pieces)
 
 	if info.Length > 0 {
 		// Single-file case
@@ -226,7 +226,7 @@ func ContactTrackers(trackers []string, infoHash, peerID, event string, uploaded
 }
 
 // GatherTrackers extracts and returns a list of tracker URLs from the torrent file
-func GatherTrackers(torrentFile *TorrentFile) []string {
+func GatherTrackers(torrentFile *Torrent) []string {
 	trackers := []string{torrentFile.Announce}
 	for _, tier := range torrentFile.AnnounceList {
 		for _, t := range tier {

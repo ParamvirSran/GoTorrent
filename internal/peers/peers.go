@@ -215,3 +215,8 @@ func readChokeUnchoke(conn net.Conn) (bool, error) {
 	}
 	return false, nil // Peer is unchoking us
 }
+
+func RequestPiece(index int, pieceLength int) ([]byte, error) {
+	pieceHash := make([]byte, 20)
+	return pieceHash, nil
+}
