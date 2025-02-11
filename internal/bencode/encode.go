@@ -83,4 +83,3 @@ func encodeDict(d map[string]interface{}) ([]byte, error) {
 	buf.WriteString("e")
 	return buf.Bytes(), nil
 }
-

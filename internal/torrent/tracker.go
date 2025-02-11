@@ -28,14 +28,38 @@ type TrackerConfig struct {
 	Timeout time.Duration
 }
 
-// NewTrackerClient creates a new HTTP client with a customizable timeout
-func NewTrackerClient(config *TrackerConfig) *http.Client {
-	if config == nil {
-		config = &TrackerConfig{Timeout: 10 * time.Second} // default timeout
+// ContactTrackers tries to contact multiple trackers and gather peers
+func ContactTrackers(trackers []string, infoHash, peerID, event string, uploaded, downloaded, left, port int) ([]string, error) {
+	var peerList []string
+	for _, trackerURL := range trackers {
+		peers, err := extractPeersFromTracker(trackerURL, infoHash, peerID, event, uploaded, downloaded, left, port)
+		if err != nil {
+			log.Printf("Error contacting tracker %s: %v", trackerURL, err)
+			continue
+		}
+		if len(peers) > 0 {
+			peerList = append(peerList, peers...)
+			event = "" // After the first successful announce, the event should be empty
+		}
 	}
-	return &http.Client{
-		Timeout: config.Timeout,
+	if len(peerList) == 0 {
+		return nil, fmt.Errorf("no valid peers found from any tracker")
 	}
+	return peerList, nil
+}
+
+// GatherTrackers extracts and returns a list of tracker URLs from the torrent file
+func GatherTrackers(torrentFile *Torrent) []string {
+	trackers := []string{torrentFile.Announce}
+	for _, tier := range torrentFile.AnnounceList {
+		for _, t := range tier {
+			tURL, err := url.Parse(t)
+			if err == nil && tURL.Scheme != "udp" {
+				trackers = append(trackers, tURL.String())
+			}
+		}
+	}
+	return trackers[1:]
 }
 
 // GeneratePeerID creates a random peer ID with a fixed prefix "-GO-" and a random 8-byte part.
@@ -98,8 +122,18 @@ func GetInfoHash(info InfoDictionary) ([]byte, error) {
 	return hash[:], nil // converting the [20]byte hash to []byte
 }
 
-// BuildAnnounceURL creates the announcement URL for sending to trackers
-func BuildAnnounceURL(baseURL, infoHash, peerID, event string, uploaded, downloaded, left, port int) (string, error) {
+// newTrackerClient creates a new HTTP client with a customizable timeout
+func newTrackerClient(config *TrackerConfig) *http.Client {
+	if config == nil {
+		config = &TrackerConfig{Timeout: 10 * time.Second} // default timeout
+	}
+	return &http.Client{
+		Timeout: config.Timeout,
+	}
+}
+
+// buildAnnounceURL creates the announcement URL for sending to trackers
+func buildAnnounceURL(baseURL, infoHash, peerID, event string, uploaded, downloaded, left, port int) (string, error) {
 	// validate mandatory parameters
 	if baseURL == "" || infoHash == "" || peerID == "" {
 		return "", fmt.Errorf("missing required parameters: baseURL, infoHash, or peerID")
@@ -139,8 +173,8 @@ func addQueryParam(params url.Values, key, value string) {
 	}
 }
 
-// SendGetRequest sends a GET request to the tracker
-func SendGetRequest(url string, client *http.Client) ([]byte, error) {
+// sendGetRequest sends a GET request to the tracker
+func sendGetRequest(url string, client *http.Client) ([]byte, error) {
 	// send the GET request
 	response, err := client.Get(url)
 	if err != nil {
@@ -162,8 +196,8 @@ func SendGetRequest(url string, client *http.Client) ([]byte, error) {
 	return body, nil // return response body
 }
 
-// ParseTrackerResponse decodes the response from the tracker
-func ParseTrackerResponse(response []byte) (map[string]interface{}, error) {
+// parseTrackerResponse decodes the response from the tracker
+func parseTrackerResponse(response []byte) (map[string]interface{}, error) {
 	decoded, err := bencode.Decode(bytes.NewReader(response))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode tracker response: %w", err)
@@ -174,25 +208,25 @@ func ParseTrackerResponse(response []byte) (map[string]interface{}, error) {
 		return nil, fmt.Errorf("invalid tracker response format: expected dictionary but got %T", decoded)
 	}
 	if failReason, ok := trackerResponse["failure reason"].(string); ok {
-		return nil, fmt.Errorf(failReason)
+		return nil, fmt.Errorf("tracker failure reason %s", failReason)
 	}
 	return trackerResponse, nil
 }
 
 // extractPeersFromTracker sends a request to the tracker and extracts peers
 func extractPeersFromTracker(trackerURL, infoHash, peerID, event string, uploaded, downloaded, left, port int) ([]string, error) {
-	requestURL, err := BuildAnnounceURL(trackerURL, infoHash, peerID, event, uploaded, downloaded, left, port)
+	requestURL, err := buildAnnounceURL(trackerURL, infoHash, peerID, event, uploaded, downloaded, left, port)
 	if err != nil {
 		return nil, fmt.Errorf("error building announce URL: %w", err)
 	}
 
-	client := NewTrackerClient(nil) // Default timeout
-	resp, err := SendGetRequest(requestURL, client)
+	client := newTrackerClient(nil) // Default timeout
+	resp, err := sendGetRequest(requestURL, client)
 	if err != nil {
 		return nil, fmt.Errorf("error sending GET request: %w", err)
 	}
 
-	trackerResp, err := ParseTrackerResponse(resp)
+	trackerResp, err := parseTrackerResponse(resp)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing tracker response: %w", err)
 	}
@@ -203,38 +237,4 @@ func extractPeersFromTracker(trackerURL, infoHash, peerID, event string, uploade
 	}
 
 	return peerList, nil
-}
-
-// ContactTrackers tries to contact multiple trackers and gather peers
-func ContactTrackers(trackers []string, infoHash, peerID, event string, uploaded, downloaded, left, port int) ([]string, error) {
-	var peerList []string
-	for _, trackerURL := range trackers {
-		peers, err := extractPeersFromTracker(trackerURL, infoHash, peerID, event, uploaded, downloaded, left, port)
-		if err != nil {
-			log.Printf("Error contacting tracker %s: %v", trackerURL, err)
-			continue
-		}
-		if len(peers) > 0 {
-			peerList = append(peerList, peers...)
-			event = "" // After the first successful announce, the event should be empty
-		}
-	}
-	if len(peerList) == 0 {
-		return nil, fmt.Errorf("no valid peers found from any tracker")
-	}
-	return peerList, nil
-}
-
-// GatherTrackers extracts and returns a list of tracker URLs from the torrent file
-func GatherTrackers(torrentFile *Torrent) []string {
-	trackers := []string{torrentFile.Announce}
-	for _, tier := range torrentFile.AnnounceList {
-		for _, t := range tier {
-			tURL, err := url.Parse(t)
-			if err == nil && tURL.Scheme != "udp" {
-				trackers = append(trackers, tURL.String())
-			}
-		}
-	}
-	return trackers
 }

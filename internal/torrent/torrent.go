@@ -2,7 +2,6 @@ package torrent
 
 import (
 	"bytes"
-	"crypto/sha1"
 	"fmt"
 	"os"
 
@@ -155,7 +154,7 @@ func parseInfo(infoDict map[string]interface{}) (*InfoDictionary, error) {
 		return nil, err
 	}
 
-	if err := ValidatePieceLength(info.PieceLength); err != nil {
+	if err := validatePieceLength(info.PieceLength); err != nil {
 		return nil, err
 	}
 
@@ -261,23 +260,23 @@ func parseFile(fileDict map[string]interface{}) (File, error) {
 	return fileInfo, nil
 }
 
-// ValidatePieceLength checks if the piece length is within valid bounds
-func ValidatePieceLength(pieceLength int) error {
+// validatePieceLength checks if the piece length is within valid bounds
+func validatePieceLength(pieceLength int) error {
 	if pieceLength < MinPieceLength || pieceLength > MaxPieceLength {
 		return fmt.Errorf("invalid piece length: %d (must be between %d and %d)", pieceLength, MinPieceLength, MaxPieceLength)
 	}
 	return nil
 }
 
-func (info *InfoDictionary) SplitPieces() [][]byte {
-	var pieces [][]byte
-	for i := 0; i < len(info.Pieces); i += sha1.Size {
-		// Ensure that the last piece is included even if it's smaller than sha1.Size
-		end := i + sha1.Size
-		if end > len(info.Pieces) {
-			end = len(info.Pieces)
-		}
-		pieces = append(pieces, info.Pieces[i:end])
-	}
-	return pieces
-}
+// func (info *InfoDictionary) SplitPieces() [][]byte {
+// 	var pieces [][]byte
+// 	for i := 0; i < len(info.Pieces); i += sha1.Size {
+// 		// Ensure that the last piece is included even if it's smaller than sha1.Size
+// 		end := i + sha1.Size
+// 		if end > len(info.Pieces) {
+// 			end = len(info.Pieces)
+// 		}
+// 		pieces = append(pieces, info.Pieces[i:end])
+// 	}
+// 	return pieces
+// }
