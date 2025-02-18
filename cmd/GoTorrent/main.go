@@ -34,11 +34,11 @@ func main() {
 	torrentFile, infoHash, peerID := initializeTorrent(torrentPath)
 
 	// Gather trackers and get peers
-	peerList := getPeers(torrentFile, infoHash, peerID)
+	peerID_list, peer_address_list := getPeers(torrentFile, infoHash, peerID)
 
 	// Channel to monitor peer status
-	peerStatusChan := make(chan string, len(peerList))
-	go connectToPeers(peerList, infoHash, peerID, peerStatusChan)
+	peerStatusChan := make(chan string, len(peer_address_list))
+	go connectToPeers(peerID_list, peer_address_list, infoHash, peerID, peerStatusChan)
 	go func() {
 		for status := range peerStatusChan {
 			log.Println("Peer status:", status)
@@ -90,42 +90,43 @@ func initializeTorrent(torrentPath string) (*torrent.Torrent, []byte, []byte) {
 }
 
 // getPeers returns the compact peer list from the tracker
-func getPeers(torrentFile *torrent.Torrent, infoHash []byte, peerID []byte) []string {
+func getPeers(torrentFile *torrent.Torrent, infoHash []byte, peerID []byte) ([]string, []string) {
 	trackers := torrent.GatherTrackers(torrentFile)
 	if len(trackers) == 0 {
 		log.Fatal("No valid trackers found")
 	}
-	log.Println(torrentFile.Info.Pieces)
-	left := 1
+	left := torrentFile.Info.PieceLength * len(torrentFile.Info.Pieces)
+	log.Println(left)
 	uploaded := 0
 	downloaded := 0
-	peerList, err := torrent.ContactTrackers(trackers, string(infoHash), string(peerID), StartEvent, uploaded, downloaded, left, DefaultPort)
+	peerID_list, peer_address_list, err := torrent.ContactTrackers(trackers, string(infoHash), string(peerID), StartEvent, uploaded, downloaded, left, DefaultPort)
 	if err != nil {
 		log.Fatalf("Error contacting trackers: %v", err)
 	}
 
-	if len(peerList) == 0 {
+	if len(peer_address_list) == 0 {
 		log.Fatal("No peers found")
 	}
 
-	return peerList
+	return peerID_list, peer_address_list
 }
 
 // connectToPeers establishes connections to each peer in the peer list concurrently
-func connectToPeers(peerList []string, infoHash []byte, peerID []byte, peerStatusChan chan string) {
+func connectToPeers(peerID_list, peer_address_list []string, infoHash []byte, clientID []byte, peerStatusChan chan string) {
 	var wg sync.WaitGroup
 
-	for _, peerAddress := range peerList {
+	for i, peerAddress := range peer_address_list {
+		peer_id := peerID_list[i]
 		wg.Add(1)
-		go func(peerAddress string) {
+		go func() {
 			defer wg.Done()
-			err := peers.HandlePeerConnection(infoHash, peerID, peerAddress)
+			err := peers.HandlePeerConnection(peer_id, infoHash, clientID, peerAddress)
 			if err != nil {
 				peerStatusChan <- "Failed: " + peerAddress + " - " + err.Error()
 			} else {
 				peerStatusChan <- "Connected: " + peerAddress
 			}
-		}(peerAddress)
+		}()
 	}
 
 	go func() {
@@ -133,91 +134,3 @@ func connectToPeers(peerList []string, infoHash []byte, peerID []byte, peerStatu
 		close(peerStatusChan)
 	}()
 }
-
-// // trackAndDownload manages the downloading process
-// func trackAndDownload(torrentFile *torrent.Torrent, infoHash []byte, peerID []byte) {
-// 	pieceHashes := torrentFile.Info.SplitPieces()
-// 	totalPieces := len(pieceHashes)
-// 	downloadedPieces := make([]bool, totalPieces)
-// 	pieceData := make([][]byte, totalPieces)
-//
-// 	// Concurrently request pieces from available peers
-// 	var wg sync.WaitGroup
-// 	for i := 0; i < totalPieces; i++ {
-// 		if !downloadedPieces[i] {
-// 			wg.Add(1)
-// 			go func(pieceIndex int) {
-// 				defer wg.Done()
-// 				err := requestPiece(infoHash, peerID, pieceIndex)
-// 				if err != nil {
-// 					log.Printf("Failed to request piece %d: %v", pieceIndex, err)
-// 					return
-// 				}
-// 				// Simulate piece download completion and mark it as downloaded
-// 				downloadedPieces[pieceIndex] = true
-// 				// Once a piece is downloaded, verify its hash
-// 				err = verifyPiece(pieceData[pieceIndex], pieceHashes[pieceIndex])
-// 				if err != nil {
-// 					log.Printf("Piece %d failed verification: %v", pieceIndex, err)
-// 					// If the piece fails verification, we may need to request it again
-// 					downloadedPieces[pieceIndex] = false
-// 				} else {
-// 					log.Printf("Piece %d downloaded and verified successfully", pieceIndex)
-// 				}
-// 			}(i)
-// 		}
-// 	}
-// 	wg.Wait()
-// }
-
-// // verifyPiece verifies a downloaded piece using the piece's hash
-// func verifyPiece(pieceData []byte, expectedHash []byte) error {
-// 	// Verify the piece's integrity by comparing its hash with the expected hash
-// 	hash := utils.CalculateSHA1(pieceData)
-// 	if !utils.CompareHashes(hash, expectedHash) {
-// 		return fmt.Errorf("hash mismatch")
-// 	}
-// 	return nil
-// }
-
-// // requestPiece simulates requesting a piece from a peer
-// func requestPiece(infoHash []byte, peerID []byte, pieceIndex int) error {
-// 	// Implement communication with peers here. For example:
-// 	// - Send a "Request" message for the piece.
-// 	// - Handle incoming "Piece" messages from peers.
-// 	// This function would involve network communication with peer(s), but let's simulate here:
-// 	log.Printf("Requesting piece %d from peer", pieceIndex)
-//
-// 	// Simulate receiving piece data
-// 	pieceData := []byte("dummy piece data") // Replace with actual piece data from peer
-// 	fmt.Println(pieceData)
-//
-// 	// Store the downloaded piece data
-// 	// You may want to append this to a global slice or write it to a file.
-// 	log.Printf("Received piece %d", pieceIndex)
-//
-// 	// In real implementation, this is where you would save the piece data.
-// 	// For simplicity, we're just logging it here.
-// 	return nil
-// }
-
-// // gracefulShutdown handles program termination
-// func gracefulShutdown() {
-// 	log.Println("Shutting down gracefully...")
-//
-// 	// Clean up resources such as peer connections, file writes, etc.
-// 	err := cleanupResources()
-// 	if err != nil {
-// 		log.Printf("Error during shutdown: %v", err)
-// 	}
-//
-// 	log.Println("Graceful shutdown complete.")
-// 	os.Exit(0)
-// }
-//
-// // cleanupResources handles cleanup operations
-// func cleanupResources() error {
-// 	// Close any open peer connections, stop ongoing downloads, etc.
-// 	// You can add a close operation here for connections, files, etc.
-// 	return nil
-// }

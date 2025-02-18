@@ -21,3 +21,4 @@ go.work.sum
 .DS_Store
 *.torrent
 GoTorrent
+*.log

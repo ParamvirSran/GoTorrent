@@ -20,7 +20,7 @@ import (
 // Constants for repeated values
 const (
 	PeerIDPrefix = "-GO-"
-	CompactParam = "compact"
+	// CompactParam = "compact"
 )
 
 // TrackerConfig defines configurable parameters for tracker communication
@@ -29,23 +29,36 @@ type TrackerConfig struct {
 }
 
 // ContactTrackers tries to contact multiple trackers and gather peers
-func ContactTrackers(trackers []string, infoHash, peerID, event string, uploaded, downloaded, left, port int) ([]string, error) {
-	var peerList []string
+func ContactTrackers(trackers []string, infoHash, peerID, event string, uploaded, downloaded, left, port int) ([]string, []string, error) {
+	var peer_address_list []string
+	var peerID_list []string
+
 	for _, trackerURL := range trackers {
-		peers, err := extractPeersFromTracker(trackerURL, infoHash, peerID, event, uploaded, downloaded, left, port)
+		tracker_peerID_list, tracker_peerIP_list, err := extractPeersFromTracker(trackerURL, infoHash, peerID, event, uploaded, downloaded, left, port)
 		if err != nil {
 			log.Printf("Error contacting tracker %s: %v", trackerURL, err)
 			continue
 		}
-		if len(peers) > 0 {
-			peerList = append(peerList, peers...)
+
+		if len(tracker_peerIP_list) > 0 && len(tracker_peerID_list) > 0 && len(tracker_peerID_list) == len(tracker_peerIP_list) {
+			peer_address_list = append(peer_address_list, tracker_peerIP_list...)
+			peerID_list = append(peerID_list, tracker_peerID_list...)
 			event = "" // After the first successful announce, the event should be empty
 		}
+		if len(tracker_peerIP_list) > 0 && len(tracker_peerID_list) == 0 {
+			peer_address_list = append(peer_address_list, tracker_peerIP_list...)
+
+			unknown_peerID_list := make([]string, len(tracker_peerIP_list))
+			for i := 0; i < len(tracker_peerIP_list); i++ {
+				unknown_peerID_list[i] = ""
+			}
+			peerID_list = append(peerID_list, unknown_peerID_list...)
+		}
 	}
-	if len(peerList) == 0 {
-		return nil, fmt.Errorf("no valid peers found from any tracker")
+	if len(peer_address_list) == 0 {
+		return nil, nil, fmt.Errorf("no valid peers found from any tracker")
 	}
-	return peerList, nil
+	return peerID_list, peer_address_list, nil
 }
 
 // GatherTrackers extracts and returns a list of tracker URLs from the torrent file
@@ -153,7 +166,8 @@ func buildAnnounceURL(baseURL, infoHash, peerID, event string, uploaded, downloa
 	addQueryParam(params, "uploaded", strconv.Itoa(uploaded))
 	addQueryParam(params, "downloaded", strconv.Itoa(downloaded))
 	addQueryParam(params, "left", strconv.Itoa(left))
-	params.Add(CompactParam, "0") // request compact peer list
+	addQueryParam(params, "compact", strconv.Itoa(0))
+	// params.Add(CompactParam, "0") // request compact peer list
 
 	if event != "" {
 		addQueryParam(params, "event", event)
@@ -214,27 +228,27 @@ func parseTrackerResponse(response []byte) (map[string]interface{}, error) {
 }
 
 // extractPeersFromTracker sends a request to the tracker and extracts peers
-func extractPeersFromTracker(trackerURL, infoHash, peerID, event string, uploaded, downloaded, left, port int) ([]string, error) {
+func extractPeersFromTracker(trackerURL, infoHash, peerID, event string, uploaded, downloaded, left, port int) ([]string, []string, error) {
 	requestURL, err := buildAnnounceURL(trackerURL, infoHash, peerID, event, uploaded, downloaded, left, port)
 	if err != nil {
-		return nil, fmt.Errorf("error building announce URL: %w", err)
+		return nil, nil, fmt.Errorf("error building announce URL: %w", err)
 	}
 
 	client := newTrackerClient(nil) // Default timeout
 	resp, err := sendGetRequest(requestURL, client)
 	if err != nil {
-		return nil, fmt.Errorf("error sending GET request: %w", err)
+		return nil, nil, fmt.Errorf("error sending GET request: %w", err)
 	}
 
 	trackerResp, err := parseTrackerResponse(resp)
 	if err != nil {
-		return nil, fmt.Errorf("error parsing tracker response: %w", err)
+		return nil, nil, fmt.Errorf("error parsing tracker response: %w", err)
 	}
 
-	peerList, err := peers.ExtractPeers(trackerResp)
+	peer_id_list, peerList, err := peers.ExtractPeers(trackerResp)
 	if err != nil {
-		return nil, fmt.Errorf("error extracting peers: %w", err)
+		return nil, nil, fmt.Errorf("error extracting peers: %w", err)
 	}
 
-	return peerList, nil
+	return peer_id_list, peerList, nil
 }
