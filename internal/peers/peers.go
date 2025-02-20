@@ -49,35 +49,24 @@ func HandlePeerConnection(peerID string, infoHash []byte, clientID []byte, peerA
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 
-	log.Println(peer)
 	conn, err := d.DialContext(ctx, "tcp", peer.address)
 	if err != nil {
 		log.Fatalf("Failed to dial: %v", err)
 		return err
 	}
 	defer conn.Close()
-	log.Println(handshake)
+	log.Printf("handshake: %x", handshake)
 	if _, err := conn.Write(handshake); err != nil {
-		log.Fatal(err)
+		log.Fatal("error writing handshake:", err)
 	}
 
 	response := make([]byte, 68)
 	_, err = conn.Read(response)
 	if err != nil {
 		log.Printf("Failed to read handshake response: %v", err)
-		log.Println(response)
+		log.Println("response:", response)
 		return err
 	}
-
-	// for {
-	// 	select {
-	//
-	// 	default:
-	// 		if _, err := conn.Write([]byte{0}); err != nil {
-	// 			log.Fatal(err)
-	// 		}
-	// 	}
-	// }
 	return nil
 }
 
@@ -93,8 +82,8 @@ func ExtractPeers(trackerResp map[string]interface{}) ([]string, []string, error
 	} else if peers, ok := trackerResp["peers"].([]interface{}); ok {
 		peer_id_list, peerList, err = parseDictionaryPeers(peers)
 	}
-	log.Println(peer_id_list)
-	log.Println(peerList)
+	log.Println("peer id list:", peer_id_list)
+	log.Println("peer address list:", peerList)
 	return peer_id_list, peerList, err
 }
 

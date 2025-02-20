@@ -132,6 +132,7 @@ func GetInfoHash(info InfoDictionary) ([]byte, error) {
 
 	// compute the SHA-1 hash of the bencoded dict
 	hash := sha1.Sum(encodedInfo)
+	log.Printf("Info_Hash in Hex: %x", hash)
 	return hash[:], nil // converting the [20]byte hash to []byte
 }
 

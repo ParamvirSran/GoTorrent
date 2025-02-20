@@ -53,7 +53,6 @@ func main() {
 	go func() {
 		<-signalChan
 		log.Println("Received termination signal")
-		// gracefulShutdown()
 		done <- true
 	}()
 
@@ -95,8 +94,8 @@ func getPeers(torrentFile *torrent.Torrent, infoHash []byte, peerID []byte) ([]s
 	if len(trackers) == 0 {
 		log.Fatal("No valid trackers found")
 	}
-	left := torrentFile.Info.PieceLength * len(torrentFile.Info.Pieces)
-	log.Println(left)
+	left := torrentFile.Info.PieceLength * (len(torrentFile.Info.Pieces) / 20)
+	log.Println("left to download:", left)
 	uploaded := 0
 	downloaded := 0
 	peerID_list, peer_address_list, err := torrent.ContactTrackers(trackers, string(infoHash), string(peerID), StartEvent, uploaded, downloaded, left, DefaultPort)
