@@ -39,7 +39,7 @@ type Torrent struct {
 
 type InfoDictionary struct {
 	PieceLength int
-	Pieces      []byte // Pieces is a []byte, not a string
+	Pieces      []byte
 	Private     *int
 	Name        string
 	Length      int64
@@ -194,7 +194,7 @@ func parsePiecesField(infoDict map[string]interface{}, info *InfoDictionary) err
 	if !ok {
 		return fmt.Errorf("%s field missing or not a string", KeyPieces)
 	}
-	info.Pieces = []byte(pieces) // Convert string to []byte
+	info.Pieces = []byte(pieces)
 	return nil
 }
 

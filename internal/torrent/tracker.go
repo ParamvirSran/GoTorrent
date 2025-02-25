@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha1"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"log"
@@ -17,10 +16,9 @@ import (
 	"github.com/ParamvirSran/GoTorrent/internal/peers"
 )
 
-// Constants for repeated values
 const (
-	PeerIDPrefix = "-GO-"
-	// CompactParam = "compact"
+	PeerIDPrefix     = "-GO0001-"
+	COMPACT_PEERLIST = 0
 )
 
 // TrackerConfig defines configurable parameters for tracker communication
@@ -43,7 +41,9 @@ func ContactTrackers(trackers []string, infoHash, peerID, event string, uploaded
 		if len(tracker_peerIP_list) > 0 && len(tracker_peerID_list) > 0 && len(tracker_peerID_list) == len(tracker_peerIP_list) {
 			peer_address_list = append(peer_address_list, tracker_peerIP_list...)
 			peerID_list = append(peerID_list, tracker_peerID_list...)
-			event = "" // After the first successful announce, the event should be empty
+
+			//TODO After the first successful announce, the event will be empty for simplicity unless changed later
+			event = ""
 		}
 		if len(tracker_peerIP_list) > 0 && len(tracker_peerID_list) == 0 {
 			peer_address_list = append(peer_address_list, tracker_peerIP_list...)
@@ -75,26 +75,21 @@ func GatherTrackers(torrentFile *Torrent) []string {
 	return trackers[1:]
 }
 
-// GeneratePeerID creates a random peer ID with a fixed prefix "-GO-" and a random 8-byte part.
-// The resulting ID will be 20 characters long, including the prefix.
+// GeneratePeerID creates a random peer ID with a fixed prefix in Azureus-style format.
 func GeneratePeerID() (string, error) {
-	random := make([]byte, 8) // 8 random bytes (16 hex characters + 4 for the prefix)
-	_, err := rand.Read(random)
+	// Create a buffer to hold the peer ID (20 bytes)
+	peerID := make([]byte, 20)
+
+	// Copy the prefix into the first 8 bytes
+	copy(peerID[:8], PeerIDPrefix)
+
+	// Generate 12 random bytes for the remaining part
+	_, err := rand.Read(peerID[8:])
 	if err != nil {
 		return "", fmt.Errorf("error generating random peer ID: %w", err)
 	}
 
-	// Combine the prefix with the random part
-	peerID := PeerIDPrefix + hex.EncodeToString(random) // This should result in exactly 20 characters
-
-	if len(peerID) != 20 {
-		return "", fmt.Errorf("generated peer ID has invalid length: %d", len(peerID))
-	}
-
-	// Escape the peer ID (URL-encode)
-	escapedPeerID := url.QueryEscape(peerID)
-
-	return escapedPeerID, nil
+	return string(peerID), nil
 }
 
 // GetInfoHash calculates the SHA-1 hash of the bencoded "info" dictionary
@@ -124,7 +119,6 @@ func GetInfoHash(info InfoDictionary) ([]byte, error) {
 		infoMap["files"] = files
 	}
 
-	// bencode the info dict
 	encodedInfo, err := bencode.Encode(infoMap)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encode info dictionary: %w", err)
@@ -132,14 +126,13 @@ func GetInfoHash(info InfoDictionary) ([]byte, error) {
 
 	// compute the SHA-1 hash of the bencoded dict
 	hash := sha1.Sum(encodedInfo)
-	log.Printf("Info_Hash in Hex: %x", hash)
 	return hash[:], nil // converting the [20]byte hash to []byte
 }
 
 // newTrackerClient creates a new HTTP client with a customizable timeout
 func newTrackerClient(config *TrackerConfig) *http.Client {
 	if config == nil {
-		config = &TrackerConfig{Timeout: 10 * time.Second} // default timeout
+		config = &TrackerConfig{Timeout: 10 * time.Second}
 	}
 	return &http.Client{
 		Timeout: config.Timeout,
@@ -167,8 +160,7 @@ func buildAnnounceURL(baseURL, infoHash, peerID, event string, uploaded, downloa
 	addQueryParam(params, "uploaded", strconv.Itoa(uploaded))
 	addQueryParam(params, "downloaded", strconv.Itoa(downloaded))
 	addQueryParam(params, "left", strconv.Itoa(left))
-	addQueryParam(params, "compact", strconv.Itoa(0))
-	// params.Add(CompactParam, "0") // request compact peer list
+	addQueryParam(params, "compact", strconv.Itoa(COMPACT_PEERLIST))
 
 	if event != "" {
 		addQueryParam(params, "event", event)
@@ -177,7 +169,6 @@ func buildAnnounceURL(baseURL, infoHash, peerID, event string, uploaded, downloa
 	// attach query parameters to the URL
 	trackerURL.RawQuery = params.Encode()
 
-	// return the full announce URL
 	return trackerURL.String(), nil
 }
 
@@ -190,25 +181,22 @@ func addQueryParam(params url.Values, key, value string) {
 
 // sendGetRequest sends a GET request to the tracker
 func sendGetRequest(url string, client *http.Client) ([]byte, error) {
-	// send the GET request
 	response, err := client.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("error sending GET request: %w", err)
 	}
 	defer response.Body.Close()
 
-	// check if the response status code is 200 OK
 	if response.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("received non-OK HTTP status: %s", response.Status)
 	}
 
-	// read the response body
 	body, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, fmt.Errorf("error reading response body: %w", err)
 	}
 
-	return body, nil // return response body
+	return body, nil
 }
 
 // parseTrackerResponse decodes the response from the tracker
@@ -235,7 +223,7 @@ func extractPeersFromTracker(trackerURL, infoHash, peerID, event string, uploade
 		return nil, nil, fmt.Errorf("error building announce URL: %w", err)
 	}
 
-	client := newTrackerClient(nil) // Default timeout
+	client := newTrackerClient(nil)
 	resp, err := sendGetRequest(requestURL, client)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error sending GET request: %w", err)
