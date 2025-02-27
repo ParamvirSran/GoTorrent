@@ -1,47 +1,12 @@
 package peers
 
 import (
-	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"log"
 	"net"
 	"strconv"
 	"time"
-)
-
-type Message_ID byte
-
-const (
-	MsgChoke         Message_ID = 0
-	MsgUnchoke       Message_ID = 1
-	MsgInterested    Message_ID = 2
-	MsgNotInterested Message_ID = 3
-	MsgHave          Message_ID = 4
-	MsgBitfield      Message_ID = 5
-	MsgRequest       Message_ID = 6
-	MsgPiece         Message_ID = 7
-	MsgCancel        Message_ID = 8
-)
-
-type Message struct {
-	ID      Message_ID
-	Payload []byte
-}
-
-func (m *Message) Serialize() []byte {
-	length := uint32(len(m.Payload) + 1)
-	buf := make([]byte, 4+length)
-	binary.BigEndian.PutUint32(buf[0:4], length)
-	buf[4] = byte(m.ID)
-	copy(buf[5:], m.Payload)
-	return buf
-}
-
-const (
-	PROTOCOL_STRING = "BitTorrent protocol"
-	PROTOCOL_LENGTH = byte(len(PROTOCOL_STRING))
 )
 
 // Peer is a struct that holds all the state for a peer the client will communicate with
@@ -59,15 +24,6 @@ type PeerState struct {
 	peer_interested bool
 }
 
-// Handshake represents the handshake message in the Peer Wire Protocol
-type Handshake struct {
-	Protocol_String_Len byte
-	Protocol_String     string
-	Reserved            [8]byte
-	Info_Hash           [20]byte
-	Peer_ID             [20]byte
-}
-
 // CreatePeer to store info about each peer
 func CreatePeer(peerID, address string) *Peer {
 	return &Peer{
@@ -82,102 +38,15 @@ func CreatePeer(peerID, address string) *Peer {
 	}
 }
 
-// Serialize serializes the handshake into a byte slice
-func (h *Handshake) Serialize() []byte {
-	buf := new(bytes.Buffer)
-	buf.WriteByte(h.Protocol_String_Len)
-	buf.WriteString(h.Protocol_String)
-	buf.Write(h.Reserved[:])
-	buf.Write(h.Info_Hash[:])
-	buf.Write(h.Peer_ID[:])
-	return buf.Bytes()
-}
-
-// DeserializeHandshake deserializes a handshake from a byte slice
-func DeserializeHandshake(data []byte) (*Handshake, error) {
-	if len(data) < 49 {
-		return nil, fmt.Errorf("handshake too short")
-	}
-
-	h := &Handshake{
-		Protocol_String_Len: data[0],
-		Protocol_String:     string(data[1:20]),
-	}
-	copy(h.Reserved[:], data[20:28])
-	copy(h.Info_Hash[:], data[28:48])
-	copy(h.Peer_ID[:], data[48:68])
-
-	return h, nil
-}
-
-// createHandshake creates the initial handshake message to send to a peer when connecting.
-func createHandshake(infoHash []byte, clientID []byte) ([]byte, error) {
-	if len(infoHash) != 20 {
-		return nil, fmt.Errorf("infoHash length is %d, expected 20", len(infoHash))
-	}
-	if len(clientID) != 20 {
-		return nil, fmt.Errorf("clientID length is %d, expected 20", len(clientID))
-	}
-
-	// Create the handshake message
-	handshake := &Handshake{
-		Protocol_String_Len: PROTOCOL_LENGTH,
-		Protocol_String:     PROTOCOL_STRING,
-		Reserved:            [8]byte{}, // Reserved bytes are all zero
-		Info_Hash:           [20]byte(infoHash),
-		Peer_ID:             [20]byte(clientID),
-	}
-
-	// Serialize the handshake into a byte slice
-	return handshake.Serialize(), nil
-}
-
-func validateHandshakeResponse(response []byte, expectedInfoHash [20]byte) error {
-	if len(response) < 68 {
-		return fmt.Errorf("invalid handshake response length: %d", len(response))
-	}
-
-	// Check protocol string
-	protocolStr := string(response[1:20])
-	if protocolStr != PROTOCOL_STRING {
-		return fmt.Errorf("invalid protocol string: %s", protocolStr)
-	}
-
-	// Check info hash
-	var infoHash [20]byte
-	copy(infoHash[:], response[28:48])
-	if !bytes.Equal(infoHash[:], expectedInfoHash[:]) {
-		return fmt.Errorf("invalid info hash: %x", infoHash)
-	}
-
-	return nil
-}
-
-func isValidPeerAddress(address string) bool {
-	host, port, err := net.SplitHostPort(address)
-	if err != nil {
-		return false
-	}
-	ip := net.ParseIP(host)
-	if ip == nil || ip.IsPrivate() {
-		return false
-	}
-	portNum, err := strconv.Atoi(port)
-	if err != nil || portNum < 1024 || portNum > 65535 {
-		return false
-	}
-	return true
-}
-
 // HandlePeerConnection handles individual peer connections
-func HandlePeerConnection(peer_id string, info_hash []byte, client_id []byte, peer_address string) error {
-	if !isValidPeerAddress(peer_address) {
-		return fmt.Errorf("invalid peer address: %s", peer_address)
+func HandlePeerConnection(peerID string, infoHash []byte, clientID []byte, peerAddress string) error {
+	if !isValidPeerAddress(peerAddress) {
+		return fmt.Errorf("invalid peer address: %s", peerAddress)
 	}
 
-	peer := CreatePeer(peer_id, peer_address)
+	peer := CreatePeer(peerID, peerAddress)
 
-	handshake, err := createHandshake(info_hash, client_id)
+	handshake, err := CreateHandshake(infoHash, clientID)
 	if err != nil {
 		return fmt.Errorf("error creating handshake: %v", err)
 	}
@@ -186,7 +55,6 @@ func HandlePeerConnection(peer_id string, info_hash []byte, client_id []byte, pe
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Connect to the peer
 	conn, err := d.DialContext(ctx, "tcp", peer.address)
 	if err != nil {
 		log.Printf("Failed to dial %s: %v", peer.address, err)
@@ -209,16 +77,70 @@ func HandlePeerConnection(peer_id string, info_hash []byte, client_id []byte, pe
 		log.Printf("Failed to read handshake response: %v", err)
 		return err
 	}
-	log.Printf("Handshake response: %x", response[:n])
 
-	// Validate the handshake response
-	if err := validateHandshakeResponse(response[:n], [20]byte(info_hash)); err != nil {
+	// Validate handshake
+	if err := ValidateHandshakeResponse(response[:n], [20]byte(infoHash)); err != nil {
 		log.Printf("Invalid handshake response: %v", err)
 		return err
 	}
 	log.Printf("Handshake successful with peer: %s", peer.address)
 
-	return nil
+	// Message handling loop
+	for {
+		select {
+		case <-ctx.Done():
+			log.Printf("Disconnecting from peer: %s", peer.address)
+			return nil
+		default:
+			// Read messages from the peer
+			msgBuf := make([]byte, 200)
+			conn.SetReadDeadline(time.Now().Add(30 * time.Second)) // Timeout for keep-alive
+
+			_, err := conn.Read(msgBuf)
+			if err != nil {
+				log.Printf("Peer %s disconnected: %v", peer.address, err)
+				return err
+			}
+
+			// Handle incoming messages
+			message, err := ParseMessage(msgBuf)
+			if err != nil {
+				log.Printf("Error parsing message from %s: %v", peer.address, err)
+				continue
+			}
+
+			log.Printf("Received message %d from peer %s", message.ID, peer.address)
+
+			// Handle specific message types
+			switch message.ID {
+			case MsgChoke:
+				peer.peer_state.peer_choking = true
+			case MsgUnchoke:
+				peer.peer_state.peer_choking = false
+			case MsgInterested:
+				peer.peer_state.peer_interested = true
+			case MsgNotInterested:
+				peer.peer_state.peer_interested = false
+			default:
+			}
+		}
+	}
+}
+
+func isValidPeerAddress(address string) bool {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil {
+		return false
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || ip.IsPrivate() {
+		return false
+	}
+	portNum, err := strconv.Atoi(port)
+	if err != nil || portNum < 1024 || portNum > 65535 {
+		return false
+	}
+	return true
 }
 
 // ExtractPeers will take the peers returned from a tracker and return the parsed peer list

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -18,45 +20,53 @@ const (
 )
 
 func main() {
+	// Set up logging
 	logFile, err := os.OpenFile("app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		log.Fatalf("Failed to open log file: %v", err)
 	}
 	defer logFile.Close()
-
-	// Set output of the standard logger to the file
 	log.SetOutput(logFile)
 
-	// Parse command-line arguments
+	// Parse torrent file
 	torrentPath := parseArgs()
-
-	// Parse .torrent file and initialize download parameters
 	torrentFile, infoHash, peerID := initializeTorrent(torrentPath)
+	peerIDList, peerAddressList := getPeers(torrentFile, infoHash, peerID)
 
-	// Gather trackers and get peers
-	peerID_list, peer_address_list := getPeers(torrentFile, infoHash, peerID)
+	// Context for managing peer goroutines
+	ctx, cancel := context.WithCancel(context.Background())
 
-	// Channel to monitor peer status
-	peerStatusChan := make(chan string, len(peer_address_list))
-	go connectToPeers(peerID_list, peer_address_list, infoHash, peerID, peerStatusChan)
-	go func() {
-		for status := range peerStatusChan {
-			log.Println("Peer status:", status)
-		}
-	}()
-
-	// Signal channel for graceful shutdown
+	// Handle OS signals for graceful shutdown
 	signalChan := make(chan os.Signal, 1)
-	done := make(chan bool, 1)
 	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		<-signalChan
 		log.Println("Received termination signal")
-		done <- true
+		cancel() // Cancel all goroutines
 	}()
 
-	<-done
+	// Start peer connections
+	var wg sync.WaitGroup
+	peerStatusChan := make(chan string, len(peerAddressList))
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		connectToPeers(ctx, peerIDList, peerAddressList, infoHash, peerID, peerStatusChan)
+	}()
+
+	// Log peer statuses
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for status := range peerStatusChan {
+			fmt.Println("Peer status:", status)
+		}
+	}()
+
+	// Wait for all routines to finish
+	wg.Wait()
 	log.Println("Program terminated successfully")
 }
 
@@ -88,48 +98,63 @@ func initializeTorrent(torrentPath string) (*torrent.Torrent, []byte, []byte) {
 	return torrentFile, infoHash, []byte(peerID)
 }
 
-// getPeers returns the compact peer list from the tracker
+// getPeers returns the peer list from the trackers
 func getPeers(torrentFile *torrent.Torrent, infoHash []byte, peerID []byte) ([]string, []string) {
 	trackers := torrent.GatherTrackers(torrentFile)
 	if len(trackers) == 0 {
 		log.Fatal("No valid trackers found")
 	}
+
 	left := torrentFile.Info.PieceLength * (len(torrentFile.Info.Pieces) / 20)
-	log.Println("left to download:", left)
 	uploaded := 0
 	downloaded := 0
-	peerID_list, peer_address_list, err := torrent.ContactTrackers(trackers, string(infoHash), string(peerID), StartEvent, uploaded, downloaded, left, DefaultPort)
+
+	peerIDList, peerAddressList, err := torrent.ContactTrackers(trackers, string(infoHash), string(peerID), StartEvent, uploaded, downloaded, left, DefaultPort)
 	if err != nil {
 		log.Fatalf("Error contacting trackers: %v", err)
 	}
 
-	if len(peer_address_list) == 0 {
+	if len(peerAddressList) == 0 {
 		log.Fatal("No peers found")
 	}
 
-	return peerID_list, peer_address_list
+	return peerIDList, peerAddressList
 }
 
 // connectToPeers establishes connections to each peer in the peer list concurrently
-func connectToPeers(peerID_list, peer_address_list []string, infoHash []byte, clientID []byte, peerStatusChan chan string) {
+func connectToPeers(ctx context.Context, peerIDList, peerAddressList []string, infoHash []byte, clientID []byte, peerStatusChan chan string) {
 	var wg sync.WaitGroup
 
-	for i, peerAddress := range peer_address_list {
-		peer_id := peerID_list[i]
+	for i := range peerAddressList {
 		wg.Add(1)
-		go func() {
+
+		// Capture loop variables safely
+		peerID := peerIDList[i]
+		peerAddress := peerAddressList[i]
+
+		go func(peerID, peerAddress string) {
 			defer wg.Done()
-			err := peers.HandlePeerConnection(peer_id, infoHash, clientID, peerAddress)
-			if err != nil {
-				peerStatusChan <- "Failed: " + peerAddress + " - " + err.Error()
-			} else {
-				peerStatusChan <- "Connected: " + peerAddress
+
+			// Check if context is canceled before dialing
+			select {
+			case <-ctx.Done():
+				peerStatusChan <- "Canceled: " + peerAddress
+				return
+			default:
 			}
-		}()
+
+			err := peers.HandlePeerConnection(peerID, infoHash, clientID, peerAddress)
+			if err != nil {
+				peerStatusChan <- "Failed with Peer: " + peerAddress + " - " + err.Error()
+			} else {
+				peerStatusChan <- "Done with Peer: " + peerAddress
+			}
+		}(peerID, peerAddress) // Pass explicitly to avoid loop variable capture issue
 	}
 
+	// Close peerStatusChan after all goroutines finish
 	go func() {
 		wg.Wait()
-		close(peerStatusChan)
+		close(peerStatusChan) // Close only when all peers are done
 	}()
 }
