@@ -2,7 +2,6 @@ package peers
 
 import (
 	"bytes"
-	"encoding/binary"
 	"fmt"
 	"log"
 )
@@ -43,58 +42,29 @@ type Message struct {
 	Payload []byte
 }
 
-// // Serialize will prepare a message to be sent over the wire
-// func (m *Message) Serialize() []byte {
-// 	length := uint32(len(m.Payload) + 1)
-// 	buf := make([]byte, 4+length)
-// 	binary.BigEndian.PutUint32(buf[0:4], length)
-// 	buf[4] = byte(m.ID)
-// 	copy(buf[5:], m.Payload)
-// 	return buf
-// }
-
-func ParseMessage(msgBuf []byte) (Message, error) {
-	log.Println(msgBuf)
-	// Extract the length prefix (first 4 bytes)
-	length_prefix := binary.BigEndian.Uint32(msgBuf[:4])
-
-	// Ensure the length prefix is within valid range (it should not exceed the total message size)
-	if length_prefix > uint32(len(msgBuf)) {
-		return Message{}, fmt.Errorf("invalid length prefix: %d", length_prefix)
-	}
-
-	// If length is 0, it's a keep-alive message
-	if length_prefix == 0 {
-		return Message{}, nil
-	} else {
-		// Extract the message ID (next byte after the length prefix)
-		message_id := Message_ID(msgBuf[4])
-
-		// Extract the payload (after the ID, accounting for the length prefix and the ID)
-		payload := msgBuf[5 : 5+length_prefix-1]
-
-		// Return the parsed message
-		message := Message{
-			ID:      message_id,
-			Payload: payload,
-		}
-		log.Println("parsed message:", message)
-		return message, nil
-	}
+func ParseMessage(buf []byte) (Message, error) {
+	message := Message{}
+	message.ID = Message_ID(buf[0])
+	message.Payload = buf[1:]
+	log.Println("message is", message)
+	return message, nil
 }
 
-func ValidateHandshakeResponse(response []byte, expectedInfoHash [20]byte) error {
+// ValidateHandshakeResponse will check if received handshake is valid
+func ValidateHandshakeResponse(peer *Peer, response []byte, expectedInfoHash [20]byte) error {
+	// if peer.peer_id != "" && peer.peer_id != string(response[48:68]) {
+	// 	return fmt.Errorf("invalid handshake peer id that doesn't match the recorded peer id: peer id (%s), rec'd id (%s)", peer.peer_id, string(response[48:68]))
+	// }
+
 	if len(response) < 68 {
 		return fmt.Errorf("invalid handshake response length: %d", len(response))
 	}
 
-	// Check protocol string
 	protocolStr := string(response[1:20])
 	if protocolStr != PROTOCOL_STRING {
 		return fmt.Errorf("invalid protocol string: %s", protocolStr)
 	}
 
-	// Check info hash
 	var infoHash [20]byte
 	copy(infoHash[:], response[28:48])
 	if !bytes.Equal(infoHash[:], expectedInfoHash[:]) {
@@ -104,7 +74,7 @@ func ValidateHandshakeResponse(response []byte, expectedInfoHash [20]byte) error
 	return nil
 }
 
-// CreateHandshake creates the initial handshake message to send to a peer when connecting.
+// CreateHandshake creates the initial handshake message to send to a peer when connecting
 func CreateHandshake(infoHash []byte, clientID []byte) ([]byte, error) {
 	if len(infoHash) != 20 {
 		return nil, fmt.Errorf("infoHash length is %d, expected 20", len(infoHash))
@@ -137,19 +107,19 @@ func (h *Handshake) Serialize() []byte {
 	return buf.Bytes()
 }
 
-// DeserializeHandshake deserializes a handshake from a byte slice
-func DeserializeHandshake(data []byte) (*Handshake, error) {
-	if len(data) < 49 {
-		return nil, fmt.Errorf("handshake too short")
-	}
-
-	h := &Handshake{
-		Protocol_String_Len: data[0],
-		Protocol_String:     string(data[1:20]),
-	}
-	copy(h.Reserved[:], data[20:28])
-	copy(h.Info_Hash[:], data[28:48])
-	copy(h.Peer_ID[:], data[48:68])
-
-	return h, nil
-}
+// // DeserializeHandshake deserializes a handshake from a byte slice
+// func DeserializeHandshake(data []byte) (*Handshake, error) {
+// 	if len(data) < 49 {
+// 		return nil, fmt.Errorf("handshake too short")
+// 	}
+//
+// 	h := &Handshake{
+// 		Protocol_String_Len: data[0],
+// 		Protocol_String:     string(data[1:20]),
+// 	}
+// 	copy(h.Reserved[:], data[20:28])
+// 	copy(h.Info_Hash[:], data[28:48])
+// 	copy(h.Peer_ID[:], data[48:68])
+//
+// 	return h, nil
+// }

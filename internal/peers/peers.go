@@ -2,7 +2,9 @@ package peers
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"strconv"
@@ -57,59 +59,53 @@ func HandlePeerConnection(peerID string, infoHash []byte, clientID []byte, peerA
 
 	conn, err := d.DialContext(ctx, "tcp", peer.address)
 	if err != nil {
-		log.Printf("Failed to dial %s: %v", peer.address, err)
-		return err
+		return fmt.Errorf("Failed to dial %s: %v", peer.address, err)
 	}
 	defer conn.Close()
-	log.Printf("Connected to peer: %s", peer.address)
 
 	// Send the handshake
 	if _, err := conn.Write(handshake); err != nil {
-		log.Printf("Error writing handshake: %v", err)
-		return err
+		return fmt.Errorf("Error writing handshake: %v", err)
 	}
 
 	// Read the handshake response
 	response := make([]byte, 68)
-	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(120 * time.Second))
 	n, err := conn.Read(response)
 	if err != nil {
-		log.Printf("Failed to read handshake response: %v", err)
-		return err
+		return fmt.Errorf("Failed to read handshake response: %v", err)
 	}
 
 	// Validate handshake
-	if err := ValidateHandshakeResponse(response[:n], [20]byte(infoHash)); err != nil {
-		log.Printf("Invalid handshake response: %v", err)
-		return err
+	if err := ValidateHandshakeResponse(peer, response[:n], [20]byte(infoHash)); err != nil {
+		return fmt.Errorf("Invalid handshake response: %v", err)
 	}
-	log.Printf("Handshake successful with peer: %s", peer.address)
 
 	// Message handling loop
 	for {
+		if _, err := conn.Write([]byte{0}); err != nil {
+			log.Println("error sending keep-alive: ", err)
+		}
+
 		select {
+
 		case <-ctx.Done():
 			log.Printf("Disconnecting from peer: %s", peer.address)
 			return nil
+
 		default:
-			// Read messages from the peer
-			msgBuf := make([]byte, 200)
-			conn.SetReadDeadline(time.Now().Add(30 * time.Second)) // Timeout for keep-alive
-
-			_, err := conn.Read(msgBuf)
+			conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+			msg, err := readLengthPrefixedMessage(conn)
 			if err != nil {
-				log.Printf("Peer %s disconnected: %v", peer.address, err)
-				return err
+				if err == io.EOF {
+					continue
+				} else {
+					log.Printf("error reading message: %v", err)
+					continue
+				}
 			}
-
-			// Handle incoming messages
-			message, err := ParseMessage(msgBuf)
-			if err != nil {
-				log.Printf("Error parsing message from %s: %v", peer.address, err)
-				continue
-			}
-
-			log.Printf("Received message %d from peer %s", message.ID, peer.address)
+			log.Printf("message received: %X", msg)
+			message, err := ParseMessage(msg)
 
 			// Handle specific message types
 			switch message.ID {
@@ -121,12 +117,35 @@ func HandlePeerConnection(peerID string, infoHash []byte, clientID []byte, peerA
 				peer.peer_state.peer_interested = true
 			case MsgNotInterested:
 				peer.peer_state.peer_interested = false
+			case MsgHave:
+				log.Println("peer has these pieces", message.Payload)
 			default:
 			}
 		}
 	}
 }
 
+func readLengthPrefixedMessage(conn net.Conn) ([]byte, error) {
+	var length uint32
+	err := binary.Read(conn, binary.BigEndian, &length)
+	if err != nil {
+		return nil, err
+	}
+	if length == 0 {
+		log.Println("received keep-alive message")
+		return nil, nil
+	}
+
+	buf := make([]byte, length)
+	_, err = io.ReadFull(conn, buf)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf, nil
+}
+
+// isValidPeerAddress checks if peers address is valid
 func isValidPeerAddress(address string) bool {
 	host, port, err := net.SplitHostPort(address)
 	if err != nil {
@@ -141,65 +160,4 @@ func isValidPeerAddress(address string) bool {
 		return false
 	}
 	return true
-}
-
-// ExtractPeers will take the peers returned from a tracker and return the parsed peer list
-func ExtractPeers(trackerResp map[string]interface{}) ([]string, []string, error) {
-	var peerList []string
-	var peer_id_list []string
-	var err error
-
-	if peers, ok := trackerResp["peers"].(string); ok {
-		peerList, err = parseCompactPeers([]byte(peers))
-
-	} else if peers, ok := trackerResp["peers"].([]interface{}); ok {
-		peer_id_list, peerList, err = parseDictionaryPeers(peers)
-	}
-	return peer_id_list, peerList, err
-}
-
-// parseCompactPeers will parse the compact peer list when we get that format
-func parseCompactPeers(peers []byte) ([]string, error) {
-	var peerList []string
-
-	if len(peers)%6 != 0 {
-		return nil, fmt.Errorf("invalid compact peers length")
-	}
-
-	for i := 0; i < len(peers); i += 6 {
-		ip := net.IP(peers[i : i+4]).String()
-		port := int(peers[i+4])<<8 + int(peers[i+5])
-		peer := fmt.Sprintf("%s:%d", ip, port)
-		peerList = append(peerList, peer)
-	}
-
-	return peerList, nil
-}
-
-// parseDictionaryPeers will return the peerlist when trackers provide us a standard peerlist in map format
-func parseDictionaryPeers(peers []interface{}) ([]string, []string, error) {
-	var peer_id_list []string
-	var peerList []string
-
-	for _, peer := range peers {
-
-		if peerMap, ok := peer.(map[string]interface{}); ok {
-			ip, ipOk := peerMap["ip"].(string)
-			port, portOk := peerMap["port"].(int)
-			peerID, idOk := peerMap["peer id"].(string)
-
-			if ipOk && portOk && idOk {
-				peerList = append(peerList, fmt.Sprintf("%s:%d", ip, port))
-				peer_id_list = append(peer_id_list, peerID)
-
-			} else {
-				return nil, nil, fmt.Errorf("peer ip: %t, peer port: %t, peer id: %t", ipOk, portOk, idOk)
-			}
-
-		} else {
-			return nil, nil, fmt.Errorf("invalid peer format, expecting dictionary format from tracker")
-		}
-	}
-
-	return peer_id_list, peerList, nil
 }

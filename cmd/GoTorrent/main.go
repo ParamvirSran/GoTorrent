@@ -23,7 +23,8 @@ func main() {
 	// Set up logging
 	logFile, err := os.OpenFile("app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		log.Fatalf("Failed to open log file: %v", err)
+		fmt.Printf("Failed to open log file: %v", err)
+		os.Exit(1)
 	}
 	defer logFile.Close()
 	log.SetOutput(logFile)
@@ -42,8 +43,8 @@ func main() {
 
 	go func() {
 		<-signalChan
-		log.Println("Received termination signal")
-		cancel() // Cancel all goroutines
+		fmt.Println("Received termination signal")
+		cancel()
 	}()
 
 	// Start peer connections
@@ -56,7 +57,7 @@ func main() {
 		connectToPeers(ctx, peerIDList, peerAddressList, infoHash, peerID, peerStatusChan)
 	}()
 
-	// Log peer statuses
+	// receive peer statuses
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -67,13 +68,14 @@ func main() {
 
 	// Wait for all routines to finish
 	wg.Wait()
-	log.Println("Program terminated successfully")
+	fmt.Println("Program terminated successfully")
 }
 
 // parseArgs handles command-line argument parsing and validation
 func parseArgs() string {
 	if len(os.Args) < 2 {
-		log.Fatalf("Usage: %s <torrent-file>", os.Args[0])
+		fmt.Printf("Usage: %s <torrent-file>", os.Args[0])
+		os.Exit(1)
 	}
 	return os.Args[1]
 }
@@ -82,17 +84,20 @@ func parseArgs() string {
 func initializeTorrent(torrentPath string) (*torrent.Torrent, []byte, []byte) {
 	torrentFile, err := torrent.ParseTorrentFile(torrentPath)
 	if err != nil {
-		log.Fatalf("Error parsing torrent file (%s): %v", torrentPath, err)
+		fmt.Printf("Error parsing torrent file (%s): %v", torrentPath, err)
+		os.Exit(1)
 	}
 
 	infoHash, err := torrent.GetInfoHash(torrentFile.Info)
 	if err != nil {
-		log.Fatalf("Error getting info hash: %v", err)
+		fmt.Printf("Error getting info hash from torrent file: %v", err)
+		os.Exit(1)
 	}
 
 	peerID, err := torrent.GeneratePeerID()
 	if err != nil {
-		log.Fatalf("Error generating peer ID: %v", err)
+		fmt.Printf("Error generating peer ID: %v", err)
+		os.Exit(1)
 	}
 
 	return torrentFile, infoHash, []byte(peerID)
@@ -102,7 +107,8 @@ func initializeTorrent(torrentPath string) (*torrent.Torrent, []byte, []byte) {
 func getPeers(torrentFile *torrent.Torrent, infoHash []byte, peerID []byte) ([]string, []string) {
 	trackers := torrent.GatherTrackers(torrentFile)
 	if len(trackers) == 0 {
-		log.Fatal("No valid trackers found")
+		fmt.Println("No valid trackers found")
+		os.Exit(1)
 	}
 
 	left := torrentFile.Info.PieceLength * (len(torrentFile.Info.Pieces) / 20)
@@ -111,11 +117,13 @@ func getPeers(torrentFile *torrent.Torrent, infoHash []byte, peerID []byte) ([]s
 
 	peerIDList, peerAddressList, err := torrent.ContactTrackers(trackers, string(infoHash), string(peerID), StartEvent, uploaded, downloaded, left, DefaultPort)
 	if err != nil {
-		log.Fatalf("Error contacting trackers: %v", err)
+		fmt.Printf("Error contacting trackers: %v", err)
+		os.Exit(1)
 	}
 
 	if len(peerAddressList) == 0 {
-		log.Fatal("No peers found")
+		fmt.Printf("No peers found")
+		os.Exit(1)
 	}
 
 	return peerIDList, peerAddressList
@@ -128,7 +136,6 @@ func connectToPeers(ctx context.Context, peerIDList, peerAddressList []string, i
 	for i := range peerAddressList {
 		wg.Add(1)
 
-		// Capture loop variables safely
 		peerID := peerIDList[i]
 		peerAddress := peerAddressList[i]
 
@@ -149,12 +156,12 @@ func connectToPeers(ctx context.Context, peerIDList, peerAddressList []string, i
 			} else {
 				peerStatusChan <- "Done with Peer: " + peerAddress
 			}
-		}(peerID, peerAddress) // Pass explicitly to avoid loop variable capture issue
+		}(peerID, peerAddress)
 	}
 
 	// Close peerStatusChan after all goroutines finish
 	go func() {
 		wg.Wait()
-		close(peerStatusChan) // Close only when all peers are done
+		close(peerStatusChan)
 	}()
 }
