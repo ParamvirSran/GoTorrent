@@ -2,14 +2,17 @@ package peers
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
+	"io"
 	"log"
+	"net"
 )
 
-type Message_ID int
+type MessageID int
 
 const (
-	MsgKeepAlive Message_ID = iota
+	MsgKeepAlive MessageID = iota
 	MsgChoke
 	MsgUnchoke
 	MsgInterested
@@ -23,28 +26,31 @@ const (
 )
 
 const (
-	PROTOCOL_STRING = "BitTorrent protocol"
-	PROTOCOL_LENGTH = byte(len(PROTOCOL_STRING))
+	_protocolString = "BitTorrent protocol"
+	_protocolLength = byte(len(_protocolString))
 )
 
 // Handshake represents the handshake message which starts peer communication in the Peer Wire Protocol
 type Handshake struct {
-	Protocol_String_Len byte
-	Protocol_String     string
-	Reserved            [8]byte
-	Info_Hash           [20]byte
-	Peer_ID             [20]byte
+	protocolStringLength byte
+	protocolString       string
+	reserved             [8]byte
+	infohash             [20]byte
+	peerID               [20]byte
 }
 
 // Message represents a message sent or received in the Peer Wire Protocol
 type Message struct {
-	ID      Message_ID
+	ID      MessageID
 	Payload []byte
 }
 
 func ParseMessage(buf []byte) (Message, error) {
+	if len(buf) == 0 {
+		return Message{ID: 0}, nil
+	}
 	message := Message{}
-	message.ID = Message_ID(buf[0])
+	message.ID = MessageID(buf[0])
 	message.Payload = buf[1:]
 	log.Println("message is", message)
 	return message, nil
@@ -52,16 +58,12 @@ func ParseMessage(buf []byte) (Message, error) {
 
 // ValidateHandshakeResponse will check if received handshake is valid
 func ValidateHandshakeResponse(peer *Peer, response []byte, expectedInfoHash [20]byte) error {
-	// if peer.peer_id != "" && peer.peer_id != string(response[48:68]) {
-	// 	return fmt.Errorf("invalid handshake peer id that doesn't match the recorded peer id: peer id (%s), rec'd id (%s)", peer.peer_id, string(response[48:68]))
-	// }
-
 	if len(response) < 68 {
 		return fmt.Errorf("invalid handshake response length: %d", len(response))
 	}
 
 	protocolStr := string(response[1:20])
-	if protocolStr != PROTOCOL_STRING {
+	if protocolStr != _protocolString {
 		return fmt.Errorf("invalid protocol string: %s", protocolStr)
 	}
 
@@ -85,41 +87,44 @@ func CreateHandshake(infoHash []byte, clientID []byte) ([]byte, error) {
 
 	// Create the handshake message
 	handshake := &Handshake{
-		Protocol_String_Len: PROTOCOL_LENGTH,
-		Protocol_String:     PROTOCOL_STRING,
-		Reserved:            [8]byte{}, // Reserved bytes are all zero
-		Info_Hash:           [20]byte(infoHash),
-		Peer_ID:             [20]byte(clientID),
+		protocolStringLength: _protocolLength,
+		protocolString:       _protocolString,
+		reserved:             [8]byte{}, // Reserved bytes are all zero
+		infohash:             [20]byte(infoHash),
+		peerID:               [20]byte(clientID),
 	}
 
 	// Serialize the handshake into a byte slice
-	return handshake.Serialize(), nil
+	return handshake.serialize(), nil
 }
 
-// Serialize serializes the handshake into a byte slice
-func (h *Handshake) Serialize() []byte {
+// serialize serializes the handshake into a byte slice
+func (h *Handshake) serialize() []byte {
 	buf := new(bytes.Buffer)
-	buf.WriteByte(h.Protocol_String_Len)
-	buf.WriteString(h.Protocol_String)
-	buf.Write(h.Reserved[:])
-	buf.Write(h.Info_Hash[:])
-	buf.Write(h.Peer_ID[:])
+	buf.WriteByte(h.protocolStringLength)
+	buf.WriteString(h.protocolString)
+	buf.Write(h.reserved[:])
+	buf.Write(h.infohash[:])
+	buf.Write(h.peerID[:])
 	return buf.Bytes()
 }
 
-// // DeserializeHandshake deserializes a handshake from a byte slice
-// func DeserializeHandshake(data []byte) (*Handshake, error) {
-// 	if len(data) < 49 {
-// 		return nil, fmt.Errorf("handshake too short")
-// 	}
-//
-// 	h := &Handshake{
-// 		Protocol_String_Len: data[0],
-// 		Protocol_String:     string(data[1:20]),
-// 	}
-// 	copy(h.Reserved[:], data[20:28])
-// 	copy(h.Info_Hash[:], data[28:48])
-// 	copy(h.Peer_ID[:], data[48:68])
-//
-// 	return h, nil
-// }
+func ReadLengthPrefixedMessage(conn net.Conn) ([]byte, error) {
+	var length uint32
+	err := binary.Read(conn, binary.BigEndian, &length)
+	if err != nil {
+		return nil, err
+	}
+	if length == 0 {
+		log.Println("Received keep-alive message")
+		return nil, nil
+	}
+
+	buf := make([]byte, length)
+	_, err = io.ReadFull(conn, buf)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf, nil
+}

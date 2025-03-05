@@ -2,162 +2,161 @@ package peers
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
 	"net"
-	"strconv"
+	"sync"
 	"time"
 )
 
-// Peer is a struct that holds all the state for a peer the client will communicate with
+// Peer represents a connected peer
 type Peer struct {
-	peer_id    string
-	address    string
-	peer_state PeerState
+	peerID    string
+	address   string
+	peerState PeerState
 }
 
-// PeerState is a struct that holds the flags that represent the clients representation of the bidirectional relationship with a peer
+// PeerState represents the connection state with a peer
 type PeerState struct {
-	am_choking      bool
-	am_interested   bool
-	peer_choking    bool
-	peer_interested bool
+	amChoking      bool
+	amInterested   bool
+	peerChoking    bool
+	peerInterested bool
 }
 
-// CreatePeer to store info about each peer
+// CreatePeer initializes a new peer object
 func CreatePeer(peerID, address string) *Peer {
 	return &Peer{
-		peerID,
-		address,
-		PeerState{
-			am_choking:      true,
-			am_interested:   false,
-			peer_choking:    true,
-			peer_interested: false,
+		peerID:  peerID,
+		address: address,
+		peerState: PeerState{
+			amChoking:      true,
+			amInterested:   false,
+			peerChoking:    true,
+			peerInterested: false,
 		},
 	}
 }
 
-// HandlePeerConnection handles individual peer connections
+// HandlePeerConnection manages a single peer connection
 func HandlePeerConnection(peerID string, infoHash []byte, clientID []byte, peerAddress string) error {
-	if !isValidPeerAddress(peerAddress) {
-		return fmt.Errorf("invalid peer address: %s", peerAddress)
-	}
-
 	peer := CreatePeer(peerID, peerAddress)
-
 	handshake, err := CreateHandshake(infoHash, clientID)
 	if err != nil {
 		return fmt.Errorf("error creating handshake: %v", err)
 	}
 
 	var d net.Dialer
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
 	conn, err := d.DialContext(ctx, "tcp", peer.address)
 	if err != nil {
-		return fmt.Errorf("Failed to dial %s: %v", peer.address, err)
+		return fmt.Errorf("failed to dial %s: %v", peer.address, err)
 	}
 	defer conn.Close()
 
 	// Send the handshake
 	if _, err := conn.Write(handshake); err != nil {
-		return fmt.Errorf("Error writing handshake: %v", err)
+		return fmt.Errorf("error writing handshake: %v", err)
 	}
 
-	// Read the handshake response
+	// Read handshake response
 	response := make([]byte, 68)
 	conn.SetReadDeadline(time.Now().Add(120 * time.Second))
 	n, err := conn.Read(response)
 	if err != nil {
-		return fmt.Errorf("Failed to read handshake response: %v", err)
+		return fmt.Errorf("failed to read handshake response: %v", err)
 	}
 
-	// Validate handshake
 	if err := ValidateHandshakeResponse(peer, response[:n], [20]byte(infoHash)); err != nil {
-		return fmt.Errorf("Invalid handshake response: %v", err)
+		return fmt.Errorf("invalid handshake response: %v", err)
 	}
 
-	// Message handling loop
-	for {
-		if _, err := conn.Write([]byte{0}); err != nil {
-			log.Println("error sending keep-alive: ", err)
+	// Last received keep-alive timestamp
+	lastKeepAlive := time.Now()
+
+	// Goroutine cleanup to prevent leaks
+	var once sync.Once
+	wg := sync.WaitGroup{}
+	wg.Add(1)
+
+	// Keep-alive mechanism
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				time.Sleep(30 * time.Second) // Send keep-alive every 30 sec
+				if _, err := conn.Write([]byte{0}); err != nil {
+					log.Println("Error sending keep-alive:", err)
+					once.Do(cancel) // Ensure cancel is called only once
+					return
+				}
+			}
 		}
+	}()
 
+	// Message processing loop
+	for {
 		select {
-
 		case <-ctx.Done():
 			log.Printf("Disconnecting from peer: %s", peer.address)
+			wg.Wait() // Ensure keep-alive goroutine exits
 			return nil
 
 		default:
 			conn.SetReadDeadline(time.Now().Add(120 * time.Second))
-			msg, err := readLengthPrefixedMessage(conn)
+			msg, err := ReadLengthPrefixedMessage(conn)
 			if err != nil {
 				if err == io.EOF {
 					continue
-				} else {
-					log.Printf("error reading message: %v", err)
-					continue
 				}
+				log.Printf("Error reading message: %v", err)
+				once.Do(cancel) // Ensure cancel is only called once
+				return err
 			}
-			log.Printf("message received: %X", msg)
-			message, err := ParseMessage(msg)
 
-			// Handle specific message types
+			// Handle keep-alive
+			if msg == nil {
+				log.Printf("Peer %s sent keep-alive", peer.address)
+				lastKeepAlive = time.Now()
+				continue
+			}
+
+			message, err := ParseMessage(msg)
+			if err != nil {
+				log.Println("Failed to parse message:", err)
+				continue
+			}
+
+			// Reset keep-alive on any valid message
+			lastKeepAlive = time.Now()
+
+			// Handle different message types
 			switch message.ID {
 			case MsgChoke:
-				peer.peer_state.peer_choking = true
+				peer.peerState.peerChoking = true
 			case MsgUnchoke:
-				peer.peer_state.peer_choking = false
+				peer.peerState.peerChoking = false
 			case MsgInterested:
-				peer.peer_state.peer_interested = true
+				peer.peerState.peerInterested = true
 			case MsgNotInterested:
-				peer.peer_state.peer_interested = false
+				peer.peerState.peerInterested = false
 			case MsgHave:
-				log.Println("peer has these pieces", message.Payload)
+				log.Println("Peer has these pieces:", message.Payload)
 			default:
+			}
+
+			// Disconnect peer if no keep-alive received in 2 mins
+			if time.Since(lastKeepAlive) > 120*time.Second {
+				log.Printf("Peer %s timed out", peer.address)
+				once.Do(cancel)
+				return nil
 			}
 		}
 	}
-}
-
-func readLengthPrefixedMessage(conn net.Conn) ([]byte, error) {
-	var length uint32
-	err := binary.Read(conn, binary.BigEndian, &length)
-	if err != nil {
-		return nil, err
-	}
-	if length == 0 {
-		log.Println("received keep-alive message")
-		return nil, nil
-	}
-
-	buf := make([]byte, length)
-	_, err = io.ReadFull(conn, buf)
-	if err != nil {
-		return nil, err
-	}
-
-	return buf, nil
-}
-
-// isValidPeerAddress checks if peers address is valid
-func isValidPeerAddress(address string) bool {
-	host, port, err := net.SplitHostPort(address)
-	if err != nil {
-		return false
-	}
-	ip := net.ParseIP(host)
-	if ip == nil || ip.IsPrivate() {
-		return false
-	}
-	portNum, err := strconv.Atoi(port)
-	if err != nil || portNum < 1024 || portNum > 65535 {
-		return false
-	}
-	return true
 }

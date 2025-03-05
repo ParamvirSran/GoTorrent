@@ -14,38 +14,37 @@ import (
 )
 
 const (
-	DefaultPort = 6881
-	StartEvent  = "started"
-	SHA1Size    = 20
+	_defaultPort = 6881
+	_startEvent  = "started"
+	_maxWorkers  = 10
 )
 
 func main() {
 	// Set up logging
 	logFile, err := os.OpenFile("app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		fmt.Printf("Failed to open log file: %v", err)
+		fmt.Fprintf(os.Stderr, "Failed to open log file: %v\n", err)
 		os.Exit(1)
 	}
 	defer logFile.Close()
+	log.SetFlags(log.LstdFlags | log.Lshortfile) // Add timestamps and file info
 	log.SetOutput(logFile)
 
 	// Parse torrent file
 	torrentPath := parseArgs()
-	torrentFile, infoHash, peerID := initializeTorrent(torrentPath)
-	peerIDList, peerAddressList := getPeers(torrentFile, infoHash, peerID)
+	torrentFile, infoHash, peerID, err := initializeTorrent(torrentPath)
+	if err != nil {
+		log.Fatalf("Failed to initialize torrent: %v", err)
+	}
 
-	// Context for managing peer goroutines
-	ctx, cancel := context.WithCancel(context.Background())
+	peerIDList, peerAddressList, err := getPeers(torrentFile, infoHash, peerID)
+	if err != nil {
+		log.Fatalf("Failed to get peers: %v", err)
+	}
 
-	// Handle OS signals for graceful shutdown
-	signalChan := make(chan os.Signal, 1)
-	signal.Notify(signalChan, syscall.SIGINT, syscall.SIGTERM)
-
-	go func() {
-		<-signalChan
-		fmt.Println("Received termination signal")
-		cancel()
-	}()
+	// Context for graceful shutdown
+	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer cancel()
 
 	// Start peer connections
 	var wg sync.WaitGroup
@@ -57,7 +56,7 @@ func main() {
 		connectToPeers(ctx, peerIDList, peerAddressList, infoHash, peerID, peerStatusChan)
 	}()
 
-	// receive peer statuses
+	// Receive peer statuses
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
@@ -74,75 +73,74 @@ func main() {
 // parseArgs handles command-line argument parsing and validation
 func parseArgs() string {
 	if len(os.Args) < 2 {
-		fmt.Printf("Usage: %s <torrent-file>", os.Args[0])
+		fmt.Fprintf(os.Stderr, "Usage: %s <torrent-file>\n", os.Args[0])
 		os.Exit(1)
 	}
 	return os.Args[1]
 }
 
 // initializeTorrent parses and sets up the torrent download process
-func initializeTorrent(torrentPath string) (*torrent.Torrent, []byte, []byte) {
+func initializeTorrent(torrentPath string) (*torrent.Torrent, []byte, []byte, error) {
 	torrentFile, err := torrent.ParseTorrentFile(torrentPath)
 	if err != nil {
-		fmt.Printf("Error parsing torrent file (%s): %v", torrentPath, err)
-		os.Exit(1)
+		return nil, nil, nil, fmt.Errorf("error parsing torrent file (%s): %v", torrentPath, err)
 	}
 
-	infoHash, err := torrent.GetInfoHash(torrentFile.Info)
+	infoHash, err := torrent.GetInfohash(torrentFile.Info)
 	if err != nil {
-		fmt.Printf("Error getting info hash from torrent file: %v", err)
-		os.Exit(1)
+		return nil, nil, nil, fmt.Errorf("error getting info hash: %v", err)
 	}
 
 	peerID, err := torrent.GeneratePeerID()
 	if err != nil {
-		fmt.Printf("Error generating peer ID: %v", err)
-		os.Exit(1)
+		return nil, nil, nil, fmt.Errorf("error generating peer ID: %v", err)
 	}
 
-	return torrentFile, infoHash, []byte(peerID)
+	return torrentFile, infoHash, []byte(peerID), nil
 }
 
 // getPeers returns the peer list from the trackers
-func getPeers(torrentFile *torrent.Torrent, infoHash []byte, peerID []byte) ([]string, []string) {
+func getPeers(torrentFile *torrent.Torrent, infoHash []byte, peerID []byte) ([]string, []string, error) {
 	trackers := torrent.GatherTrackers(torrentFile)
 	if len(trackers) == 0 {
-		fmt.Println("No valid trackers found")
-		os.Exit(1)
+		return nil, nil, fmt.Errorf("no valid trackers found")
 	}
 
 	left := torrentFile.Info.PieceLength * (len(torrentFile.Info.Pieces) / 20)
-	uploaded := 0
-	downloaded := 0
+	uploaded, downloaded := 0, 0
 
-	peerIDList, peerAddressList, err := torrent.ContactTrackers(trackers, string(infoHash), string(peerID), StartEvent, uploaded, downloaded, left, DefaultPort)
+	peerIDList, peerAddressList, err := torrent.ContactTrackers(trackers, string(infoHash), string(peerID), _startEvent, uploaded, downloaded, left, _defaultPort)
 	if err != nil {
-		fmt.Printf("Error contacting trackers: %v", err)
-		os.Exit(1)
+		return nil, nil, fmt.Errorf("error contacting trackers: %v", err)
 	}
 
 	if len(peerAddressList) == 0 {
-		fmt.Printf("No peers found")
-		os.Exit(1)
+		return nil, nil, fmt.Errorf("no peers found")
 	}
 
-	return peerIDList, peerAddressList
+	return peerIDList, peerAddressList, nil
 }
 
 // connectToPeers establishes connections to each peer in the peer list concurrently
-func connectToPeers(ctx context.Context, peerIDList, peerAddressList []string, infoHash []byte, clientID []byte, peerStatusChan chan string) {
+func connectToPeers(ctx context.Context, peerIDList, peerAddressList []string, infoHash, clientID []byte, peerStatusChan chan<- string) {
 	var wg sync.WaitGroup
+	defer close(peerStatusChan)
+
+	workerPool := make(chan struct{}, _maxWorkers)
 
 	for i := range peerAddressList {
+		select {
+		case <-ctx.Done():
+			// Exit early if context is canceled
+			return
+		case workerPool <- struct{}{}: // Acquire worker slot
+		}
+
 		wg.Add(1)
-
-		peerID := peerIDList[i]
-		peerAddress := peerAddressList[i]
-
 		go func(peerID, peerAddress string) {
 			defer wg.Done()
+			defer func() { <-workerPool }() // Release slot
 
-			// Check if context is canceled before dialing
 			select {
 			case <-ctx.Done():
 				peerStatusChan <- "Canceled: " + peerAddress
@@ -152,16 +150,12 @@ func connectToPeers(ctx context.Context, peerIDList, peerAddressList []string, i
 
 			err := peers.HandlePeerConnection(peerID, infoHash, clientID, peerAddress)
 			if err != nil {
-				peerStatusChan <- "Failed with Peer: " + peerAddress + " - " + err.Error()
+				peerStatusChan <- fmt.Sprintf("Failed with Peer: %s - %v", peerAddress, err)
 			} else {
 				peerStatusChan <- "Done with Peer: " + peerAddress
 			}
-		}(peerID, peerAddress)
+		}(peerIDList[i], peerAddressList[i])
 	}
 
-	// Close peerStatusChan after all goroutines finish
-	go func() {
-		wg.Wait()
-		close(peerStatusChan)
-	}()
+	wg.Wait()
 }

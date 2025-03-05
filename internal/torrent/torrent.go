@@ -9,22 +9,18 @@ import (
 )
 
 const (
-	MinPieceLength = 16 * 1024   // 16 KB
-	MaxPieceLength = 1024 * 1024 // 1 MB
-
-	// Keys for the dictionary fields
-	KeyAnnounce     = "announce"
-	KeyAnnounceList = "announce-list"
-	KeyInfo         = "info"
-	KeyPieceLength  = "piece length"
-	KeyPieces       = "pieces"
-	KeyLength       = "length"
-	KeyFiles        = "files"
-	KeyName         = "name"
-	KeyComment      = "comment"
-	KeyCreatedBy    = "created by"
-	KeyEncoding     = "encoding"
-	KeyPrivate      = "private"
+	_keyAnnounce     = "announce"
+	_keyAnnounceList = "announce-list"
+	_keyInfo         = "info"
+	_keyPieceLength  = "piece length"
+	_keyPieces       = "pieces"
+	_keyLength       = "length"
+	_keyFiles        = "files"
+	_keyName         = "name"
+	_keyComment      = "comment"
+	_keyCreatedBy    = "created by"
+	_keyEncoding     = "encoding"
+	_keyPrivate      = "private"
 )
 
 type Torrent struct {
@@ -85,7 +81,7 @@ func parseMetainfo(torrentDict map[string]interface{}) (*Torrent, error) {
 		return nil, err
 	}
 
-	infoDict, ok := torrentDict[KeyInfo].(map[string]interface{})
+	infoDict, ok := torrentDict[_keyInfo].(map[string]interface{})
 	if !ok {
 		return nil, fmt.Errorf("info dictionary missing or of incorrect type")
 	}
@@ -96,19 +92,19 @@ func parseMetainfo(torrentDict map[string]interface{}) (*Torrent, error) {
 	torrentFile.Info = *info
 
 	// Optional Fields
-	if comment, ok := torrentDict[KeyComment].(string); ok {
+	if comment, ok := torrentDict[_keyComment].(string); ok {
 		torrentFile.Comment = comment
 	}
 
-	if createdBy, ok := torrentDict[KeyCreatedBy].(string); ok {
+	if createdBy, ok := torrentDict[_keyCreatedBy].(string); ok {
 		torrentFile.CreatedBy = createdBy
 	}
 
-	if encoding, ok := torrentDict[KeyEncoding].(string); ok {
+	if encoding, ok := torrentDict[_keyEncoding].(string); ok {
 		torrentFile.Encoding = encoding
 	}
 
-	if private, ok := torrentDict[KeyPrivate].(int); ok {
+	if private, ok := torrentDict[_keyPrivate].(int); ok {
 		torrentFile.Info.Private = &private
 	}
 
@@ -121,13 +117,13 @@ func parseMetainfo(torrentDict map[string]interface{}) (*Torrent, error) {
 
 // parseAnnounce parses the "announce" and "announce-list" fields
 func parseAnnounce(torrentDict map[string]interface{}, torrentFile *Torrent) error {
-	if announce, ok := torrentDict[KeyAnnounce].(string); ok {
+	if announce, ok := torrentDict[_keyAnnounce].(string); ok {
 		torrentFile.Announce = announce
 	} else {
-		return fmt.Errorf("%s URL missing or not a string", KeyAnnounce)
+		return fmt.Errorf("%s URL missing or not a string", _keyAnnounce)
 	}
 
-	if announceList, ok := torrentDict[KeyAnnounceList].([]interface{}); ok {
+	if announceList, ok := torrentDict[_keyAnnounceList].([]interface{}); ok {
 		for _, tier := range announceList {
 			if urlList, ok := tier.([]interface{}); ok {
 				var urls []string
@@ -135,12 +131,12 @@ func parseAnnounce(torrentDict map[string]interface{}, torrentFile *Torrent) err
 					if urlString, ok := url.(string); ok {
 						urls = append(urls, urlString)
 					} else {
-						return fmt.Errorf("%s contains non-string URL: %v", KeyAnnounceList, url)
+						return fmt.Errorf("%s contains non-string URL: %v", _keyAnnounceList, url)
 					}
 				}
 				torrentFile.AnnounceList = append(torrentFile.AnnounceList, urls)
 			} else {
-				return fmt.Errorf("%s tier is not a list of URLs: %T", KeyAnnounceList, tier)
+				return fmt.Errorf("%s tier is not a list of URLs: %T", _keyAnnounceList, tier)
 			}
 		}
 	}
@@ -151,10 +147,6 @@ func parseAnnounce(torrentDict map[string]interface{}, torrentFile *Torrent) err
 func parseInfo(infoDict map[string]interface{}) (*InfoDictionary, error) {
 	info := &InfoDictionary{}
 	if err := parseNameAndPieceLength(infoDict, info); err != nil {
-		return nil, err
-	}
-
-	if err := validatePieceLength(info.PieceLength); err != nil {
 		return nil, err
 	}
 
@@ -171,28 +163,28 @@ func parseInfo(infoDict map[string]interface{}) (*InfoDictionary, error) {
 
 // parseNameAndPieceLength parses the name and piece length from the info dictionary
 func parseNameAndPieceLength(infoDict map[string]interface{}, info *InfoDictionary) error {
-	name, ok := infoDict[KeyName].(string)
+	name, ok := infoDict[_keyName].(string)
 	if !ok {
-		return fmt.Errorf("%s field missing or not a string", KeyName)
+		return fmt.Errorf("%s field missing or not a string", _keyName)
 	}
 	info.Name = name
 
-	switch pl := infoDict[KeyPieceLength].(type) {
+	switch pl := infoDict[_keyPieceLength].(type) {
 	case int:
 		info.PieceLength = pl
 	case int64:
 		info.PieceLength = int(pl)
 	default:
-		return fmt.Errorf("%s field missing or of incorrect type", KeyPieceLength)
+		return fmt.Errorf("%s field missing or of incorrect type", _keyPieceLength)
 	}
 	return nil
 }
 
 // parsePiecesField parses the "pieces" field
 func parsePiecesField(infoDict map[string]interface{}, info *InfoDictionary) error {
-	pieces, ok := infoDict[KeyPieces].(string)
+	pieces, ok := infoDict[_keyPieces].(string)
 	if !ok {
-		return fmt.Errorf("%s field missing or not a string", KeyPieces)
+		return fmt.Errorf("%s field missing or not a string", _keyPieces)
 	}
 	info.Pieces = []byte(pieces)
 	return nil
@@ -200,18 +192,18 @@ func parsePiecesField(infoDict map[string]interface{}, info *InfoDictionary) err
 
 // parseLengthOrFiles parses the "length" or "files" field
 func parseLengthOrFiles(infoDict map[string]interface{}, info *InfoDictionary) error {
-	if length, ok := infoDict[KeyLength].(int); ok {
+	if length, ok := infoDict[_keyLength].(int); ok {
 		info.Length = int64(length)
-	} else if length, ok := infoDict[KeyLength].(int64); ok {
+	} else if length, ok := infoDict[_keyLength].(int64); ok {
 		info.Length = length
-	} else if files, ok := infoDict[KeyFiles].([]interface{}); ok {
+	} else if files, ok := infoDict[_keyFiles].([]interface{}); ok {
 		parsedFiles, err := parseFiles(files)
 		if err != nil {
 			return fmt.Errorf("failed to parse files: %w", err)
 		}
 		info.Files = parsedFiles
 	} else {
-		return fmt.Errorf("neither %s nor %s field found. Torrent may be missing fields", KeyLength, KeyFiles)
+		return fmt.Errorf("neither %s nor %s field found. Torrent may be missing fields", _keyLength, _keyFiles)
 	}
 	return nil
 }
@@ -237,9 +229,9 @@ func parseFiles(files []interface{}) ([]File, error) {
 func parseFile(fileDict map[string]interface{}) (File, error) {
 	var fileInfo File
 
-	if length, ok := fileDict[KeyLength].(int); ok {
+	if length, ok := fileDict[_keyLength].(int); ok {
 		fileInfo.Length = int64(length)
-	} else if length, ok := fileDict[KeyLength].(int64); ok {
+	} else if length, ok := fileDict[_keyLength].(int64); ok {
 		fileInfo.Length = length
 	} else {
 		return fileInfo, fmt.Errorf("file length missing or not a valid type")
@@ -258,12 +250,4 @@ func parseFile(fileDict map[string]interface{}) (File, error) {
 	}
 
 	return fileInfo, nil
-}
-
-// validatePieceLength checks if the piece length is within valid bounds
-func validatePieceLength(pieceLength int) error {
-	if pieceLength < MinPieceLength || pieceLength > MaxPieceLength {
-		return fmt.Errorf("invalid piece length: %d (must be between %d and %d)", pieceLength, MinPieceLength, MaxPieceLength)
-	}
-	return nil
 }

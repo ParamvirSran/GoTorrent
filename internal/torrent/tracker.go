@@ -17,13 +17,23 @@ import (
 )
 
 const (
-	PeerIDPrefix     = "-GO0001-"
-	COMPACT_PEERLIST = 0
+	_peerIDPrefix    = "-GO0001-"
+	_compactPeerList = 0
 )
 
 // TrackerConfig defines configurable parameters for tracker communication
 type TrackerConfig struct {
-	Timeout time.Duration
+	timeout time.Duration
+}
+
+// newTrackerClient creates a new HTTP client with a customizable timeout
+func newTrackerClient(config *TrackerConfig) *http.Client {
+	if config == nil {
+		config = &TrackerConfig{timeout: 10 * time.Second}
+	}
+	return &http.Client{
+		Timeout: config.timeout,
+	}
 }
 
 // ContactTrackers tries to contact multiple trackers and gather peers
@@ -81,7 +91,7 @@ func GeneratePeerID() (string, error) {
 	peerID := make([]byte, 20)
 
 	// Copy the prefix into the first 8 bytes
-	copy(peerID[:8], PeerIDPrefix)
+	copy(peerID[:8], _peerIDPrefix)
 
 	// Generate 12 random bytes for the remaining part
 	_, err := rand.Read(peerID[8:])
@@ -92,8 +102,8 @@ func GeneratePeerID() (string, error) {
 	return string(peerID), nil
 }
 
-// GetInfoHash calculates the SHA-1 hash of the bencoded "info" dictionary
-func GetInfoHash(info InfoDictionary) ([]byte, error) {
+// GetInfohash calculates the SHA-1 hash of the bencoded "info" dictionary
+func GetInfohash(info InfoDictionary) ([]byte, error) {
 	infoMap := make(map[string]interface{})
 	infoMap["name"] = info.Name
 	infoMap["piece length"] = info.PieceLength
@@ -129,16 +139,6 @@ func GetInfoHash(info InfoDictionary) ([]byte, error) {
 	return hash[:], nil // converting the [20]byte hash to []byte
 }
 
-// newTrackerClient creates a new HTTP client with a customizable timeout
-func newTrackerClient(config *TrackerConfig) *http.Client {
-	if config == nil {
-		config = &TrackerConfig{Timeout: 10 * time.Second}
-	}
-	return &http.Client{
-		Timeout: config.Timeout,
-	}
-}
-
 // buildAnnounceURL creates the announcement URL for sending to trackers
 func buildAnnounceURL(baseURL, infoHash, peerID, event string, uploaded, downloaded, left, port int) (string, error) {
 	// validate mandatory parameters
@@ -160,7 +160,7 @@ func buildAnnounceURL(baseURL, infoHash, peerID, event string, uploaded, downloa
 	addQueryParam(params, "uploaded", strconv.Itoa(uploaded))
 	addQueryParam(params, "downloaded", strconv.Itoa(downloaded))
 	addQueryParam(params, "left", strconv.Itoa(left))
-	addQueryParam(params, "compact", strconv.Itoa(COMPACT_PEERLIST))
+	addQueryParam(params, "compact", strconv.Itoa(_compactPeerList))
 
 	if event != "" {
 		addQueryParam(params, "event", event)
