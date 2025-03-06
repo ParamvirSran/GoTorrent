@@ -2,6 +2,7 @@ package peers
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"io"
 	"log"
@@ -25,23 +26,10 @@ type PeerState struct {
 	peerInterested bool
 }
 
-// CreatePeer initializes a new peer object
-func CreatePeer(peerID, address string) *Peer {
-	return &Peer{
-		peerID:  peerID,
-		address: address,
-		peerState: PeerState{
-			amChoking:      true,
-			amInterested:   false,
-			peerChoking:    true,
-			peerInterested: false,
-		},
-	}
-}
-
 // HandlePeerConnection manages a single peer connection
 func HandlePeerConnection(peerID string, infoHash []byte, clientID []byte, peerAddress string) error {
-	peer := CreatePeer(peerID, peerAddress)
+	peer := createPeer(peerID, peerAddress)
+
 	handshake, err := CreateHandshake(infoHash, clientID)
 	if err != nil {
 		return fmt.Errorf("error creating handshake: %v", err)
@@ -110,7 +98,7 @@ func HandlePeerConnection(peerID string, infoHash []byte, clientID []byte, peerA
 
 		default:
 			conn.SetReadDeadline(time.Now().Add(120 * time.Second))
-			msg, err := ReadLengthPrefixedMessage(conn)
+			msg, err := ReadMessage(conn)
 			if err != nil {
 				if err == io.EOF {
 					continue
@@ -120,35 +108,48 @@ func HandlePeerConnection(peerID string, infoHash []byte, clientID []byte, peerA
 				return err
 			}
 
-			// Handle keep-alive
-			if msg == nil {
-				log.Printf("Peer %s sent keep-alive", peer.address)
-				lastKeepAlive = time.Now()
+			if msg.ID == nil {
 				continue
 			}
 
-			message, err := ParseMessage(msg)
-			if err != nil {
-				log.Println("Failed to parse message:", err)
-				continue
-			}
-
-			// Reset keep-alive on any valid message
-			lastKeepAlive = time.Now()
-
-			// Handle different message types
-			switch message.ID {
+			switch *msg.ID {
 			case MsgChoke:
+				log.Printf("%s - Received CHOKE message", peer.address)
 				peer.peerState.peerChoking = true
 			case MsgUnchoke:
+				log.Printf("%s - Received UNCHOKE message", peer.address)
 				peer.peerState.peerChoking = false
 			case MsgInterested:
+				log.Printf("%s - Received INTERESTED message", peer.address)
 				peer.peerState.peerInterested = true
 			case MsgNotInterested:
+				log.Printf("%s - Received NOT-INTERESTED message", peer.address)
 				peer.peerState.peerInterested = false
 			case MsgHave:
-				log.Println("Peer has these pieces:", message.Payload)
+				pieceIndex := binary.BigEndian.Uint32(msg.Payload)
+				log.Printf("%s - Received HAVE message for piece %d\n", peer.address, pieceIndex)
+			case MsgBitfield:
+				fmt.Println("%s - Received BITFIELD message:", peer.address, msg.Payload)
+			case MsgRequest:
+				index := binary.BigEndian.Uint32(msg.Payload[0:4])
+				begin := binary.BigEndian.Uint32(msg.Payload[4:8])
+				length := binary.BigEndian.Uint32(msg.Payload[8:12])
+				fmt.Printf("%s - Received REQUEST message for index %d, begin %d, length %d\n", peer.address, index, begin, length)
+			case MsgPiece:
+				index := binary.BigEndian.Uint32(msg.Payload[0:4])
+				begin := binary.BigEndian.Uint32(msg.Payload[4:8])
+				block := msg.Payload[8:]
+				fmt.Printf("%s - Received PIECE message for index %d, begin %d, block length %d\n", peer.address, index, begin, len(block))
+			case MsgCancel:
+				index := binary.BigEndian.Uint32(msg.Payload[0:4])
+				begin := binary.BigEndian.Uint32(msg.Payload[4:8])
+				length := binary.BigEndian.Uint32(msg.Payload[8:12])
+				fmt.Printf("%s - Received CANCEL message for index %d, begin %d, length %d\n", peer.address, index, begin, length)
+			case MsgPort:
+				port := binary.BigEndian.Uint16(msg.Payload)
+				fmt.Printf("%s - Received PORT message with port %d\n", peer.address, port)
 			default:
+				fmt.Printf("%s - Received unknown message ID %d\n", peer.address, *msg.ID)
 			}
 
 			// Disconnect peer if no keep-alive received in 2 mins
@@ -158,5 +159,48 @@ func HandlePeerConnection(peerID string, infoHash []byte, clientID []byte, peerA
 				return nil
 			}
 		}
+	}
+}
+
+// ReadMessage reads a message from a connection
+func ReadMessage(conn net.Conn) (Message, error) {
+	// Read the 4-byte length prefix
+	var length uint32
+	err := binary.Read(conn, binary.BigEndian, &length)
+	if err != nil {
+		return Message{}, err
+	}
+
+	if length == 0 {
+		return Message{ID: nil, Payload: nil}, nil // Keep-alive message
+	}
+
+	// Read remaining bytes
+	buf := make([]byte, length)
+	_, err = io.ReadFull(conn, buf)
+	if err != nil {
+		return Message{}, err
+	}
+
+	return ParseMessage(buf)
+}
+
+// SendMessage sends a message over a connection
+func SendMessage(conn net.Conn, msg []byte) error {
+	_, err := conn.Write(msg)
+	return err
+}
+
+// createPeer initializes a new peer object
+func createPeer(peerID, address string) *Peer {
+	return &Peer{
+		peerID:  peerID,
+		address: address,
+		peerState: PeerState{
+			amChoking:      true,
+			amInterested:   false,
+			peerChoking:    true,
+			peerInterested: false,
+		},
 	}
 }
