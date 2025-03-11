@@ -7,7 +7,7 @@ import (
 )
 
 // Encode serializes data into a bencoded format
-func Encode(data interface{}) ([]byte, error) {
+func Encode(data any) ([]byte, error) {
 	switch v := data.(type) {
 	case int64:
 		return encodeInt(int(v))
@@ -17,9 +17,9 @@ func Encode(data interface{}) ([]byte, error) {
 		return encodeString(v)
 	case []byte:
 		return encodeString(string(v)) // Treat []byte as string for bencoding
-	case []interface{}:
+	case []any:
 		return encodeList(v)
-	case map[string]interface{}:
+	case map[string]any:
 		return encodeDict(v)
 	default:
 		return nil, fmt.Errorf("unsupported type for encoding: %T", v)
@@ -28,16 +28,16 @@ func Encode(data interface{}) ([]byte, error) {
 
 // encodeInt serializes an integer into bencoded format
 func encodeInt(i int) ([]byte, error) {
-	return []byte(fmt.Sprintf("i%de", i)), nil
+	return fmt.Appendf(nil, "i%de", i), nil
 }
 
 // encodeString serializes a string into bencoded format
 func encodeString(s string) ([]byte, error) {
-	return []byte(fmt.Sprintf("%d:%s", len(s), s)), nil
+	return fmt.Appendf(nil, "%d:%s", len(s), s), nil
 }
 
 // encodeList serializes a list of items into bencoded format
-func encodeList(l []interface{}) ([]byte, error) {
+func encodeList(l []any) ([]byte, error) {
 	buf := bytes.NewBufferString("l")
 	for _, item := range l {
 		if item == nil {
@@ -54,7 +54,7 @@ func encodeList(l []interface{}) ([]byte, error) {
 }
 
 // encodeDict serializes a dictionary into bencoded format
-func encodeDict(d map[string]interface{}) ([]byte, error) {
+func encodeDict(d map[string]any) ([]byte, error) {
 	buf := bytes.NewBufferString("d")
 	keys := make([]string, 0, len(d))
 	for key := range d {

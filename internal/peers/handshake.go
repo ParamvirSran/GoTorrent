@@ -3,6 +3,7 @@ package peers
 import (
 	"bytes"
 	"fmt"
+	"log"
 )
 
 const (
@@ -42,7 +43,9 @@ func CreateHandshake(infoHash []byte, clientID []byte) ([]byte, error) {
 }
 
 // ValidateHandshakeResponse will check if received handshake is valid
-func ValidateHandshakeResponse(peer *Peer, response []byte, expectedInfoHash [20]byte) error {
+func ValidateHandshakeResponse(peerID string, response []byte, expectedInfoHash [20]byte) error {
+	log.Printf("received in handshake peerid (%s) - expected peerid (%s)", string(response[48:]), peerID)
+
 	if len(response) < 68 {
 		return fmt.Errorf("invalid handshake response length: %d", len(response))
 	}

@@ -1,4 +1,4 @@
-package download
+package common
 
 import (
 	"log"
@@ -15,7 +15,7 @@ type Piece struct {
 // PieceManager tracks which pieces are downloaded
 type PieceManager struct {
 	pieces          map[int]*Piece
-	downloadedCount int // Keeps track of how many pieces are downloaded
+	downloadedCount int
 	mu              sync.Mutex
 }
 
@@ -34,18 +34,20 @@ func (pm *PieceManager) AddPiece(index int, hash []byte) {
 	pm.pieces[index] = &Piece{Hash: hash, isDownloaded: false, isClaimed: false}
 }
 
-// ClaimPiece marks a piece as being downloaded
-func (pm *PieceManager) ClaimPiece() (int, []byte, bool) {
+// ClaimPiece marks a piece as claimed by a worker for download
+func (pm *PieceManager) ClaimPiece(index int) bool {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
 
-	for index, piece := range pm.pieces {
+	if piece, exists := pm.pieces[index]; exists {
 		if !piece.isDownloaded && !piece.isClaimed {
 			piece.isClaimed = true
-			return index, piece.Hash, true
+			log.Printf("piece %d claimed", index)
+			return true
 		}
 	}
-	return -1, nil, false
+
+	return false
 }
 
 // MarkPieceDownloaded marks a piece as downloaded
@@ -57,7 +59,7 @@ func (pm *PieceManager) MarkPieceDownloaded(index int) {
 		if !piece.isDownloaded {
 			piece.isDownloaded = true
 			piece.isClaimed = false
-			pm.downloadedCount++ // Increment the counter for downloaded pieces
+			pm.downloadedCount++
 			log.Printf("Piece %d marked as downloaded", index)
 		}
 	}

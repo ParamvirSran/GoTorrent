@@ -6,7 +6,7 @@ import (
 	"os"
 
 	"github.com/ParamvirSran/GoTorrent/internal/bencode"
-	"github.com/ParamvirSran/GoTorrent/internal/download"
+	"github.com/ParamvirSran/GoTorrent/internal/common"
 )
 
 const (
@@ -32,7 +32,7 @@ type Torrent struct {
 	CreatedBy    string
 	Encoding     string
 	Info         *InfoDictionary
-	PieceManager *download.PieceManager
+	PieceManager *common.PieceManager
 }
 
 type InfoDictionary struct {
@@ -147,7 +147,7 @@ func parseAnnounce(torrentDict map[string]interface{}, torrentFile *Torrent) err
 }
 
 // parseInfo parses the info dictionary from the torrent file
-func parseInfo(infoDict map[string]interface{}) (*InfoDictionary, *download.PieceManager, error) {
+func parseInfo(infoDict map[string]interface{}) (*InfoDictionary, *common.PieceManager, error) {
 	info := &InfoDictionary{}
 	if err := parseNameAndPieceLength(infoDict, info); err != nil {
 		return nil, nil, err
@@ -162,7 +162,7 @@ func parseInfo(infoDict map[string]interface{}) (*InfoDictionary, *download.Piec
 	}
 
 	// Initialize PieceManager
-	pieceMap := download.NewPieceManager()
+	pieceMap := common.NewPieceManager()
 
 	// Populate the PieceManager with piece hashes
 	for i := 0; i < len(info.Pieces); i += 20 {

@@ -7,7 +7,7 @@ import (
 	"strconv"
 )
 
-func Decode(r io.Reader) (interface{}, error) {
+func Decode(r io.Reader) (any, error) {
 	b := make([]byte, 1)
 	_, err := r.Read(b)
 	if err != nil {
@@ -26,7 +26,7 @@ func Decode(r io.Reader) (interface{}, error) {
 	}
 }
 
-func decodeInt(r io.Reader) (interface{}, error) {
+func decodeInt(r io.Reader) (any, error) {
 	buf := &bytes.Buffer{}
 	for {
 		b := make([]byte, 1)
@@ -47,7 +47,7 @@ func decodeInt(r io.Reader) (interface{}, error) {
 	return result, nil
 }
 
-func decodeString(r io.Reader, firstByte byte) (interface{}, error) {
+func decodeString(r io.Reader, firstByte byte) (any, error) {
 	buf := &bytes.Buffer{}
 	buf.WriteByte(firstByte)
 
@@ -80,8 +80,8 @@ func decodeString(r io.Reader, firstByte byte) (interface{}, error) {
 	return string(str), nil
 }
 
-func decodeList(r io.Reader) (interface{}, error) {
-	var result []interface{}
+func decodeList(r io.Reader) (any, error) {
+	var result []any
 
 	for {
 		b := make([]byte, 1)
@@ -102,8 +102,8 @@ func decodeList(r io.Reader) (interface{}, error) {
 	return result, nil
 }
 
-func decodeDict(r io.Reader) (map[string]interface{}, error) {
-	result := make(map[string]interface{})
+func decodeDict(r io.Reader) (map[string]any, error) {
+	result := make(map[string]any)
 
 	for {
 		b := make([]byte, 1)

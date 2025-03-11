@@ -9,7 +9,7 @@ import (
 	"sync"
 	"syscall"
 
-	"github.com/ParamvirSran/GoTorrent/internal/download"
+	"github.com/ParamvirSran/GoTorrent/internal/common"
 	"github.com/ParamvirSran/GoTorrent/internal/peers"
 	"github.com/ParamvirSran/GoTorrent/internal/torrent"
 )
@@ -17,20 +17,14 @@ import (
 const (
 	_defaultPort = "6881"
 	_startEvent  = "started"
-	_maxWorkers  = 3
 )
 
-var pieceDownloadWorkerPool = make(chan struct{}, _maxWorkers) // Global worker pool for downloading pieces
-
 func main() {
-	log.SetFlags(log.LstdFlags | log.Lshortfile)
-
-	logFile, err := os.OpenFile("app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	logFile, err := logging()
 	if err != nil {
 		fmt.Printf("Failed to open log file: %v", err)
 		os.Exit(1)
 	}
-	defer logFile.Close()
 	log.SetOutput(logFile)
 	log.Println("Starting")
 
@@ -40,26 +34,33 @@ func main() {
 		fmt.Printf("Failed to initialize torrent: %v", err)
 		os.Exit(1)
 	}
-	log.Printf("Infohash - %x", infoHash)
-	log.Printf("PeerID - %s", peerID)
 
 	peerIDList, peerAddressList, err := getPeers(torrentFile, infoHash, peerID)
 	if err != nil {
 		fmt.Printf("Failed to get peers: %v", err)
 		os.Exit(1)
 	}
-	log.Printf("PeerID List - %v", peerIDList)
-	log.Printf("PeerAddress List - %v", peerAddressList)
+	log.Printf("PeerID List - %v", len(peerIDList))
+	log.Printf("PeerAddress List - %v", len(peerAddressList))
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	log.Println("Starting peer connections...")
 	go peerManager(torrentFile.PieceManager, ctx, peerIDList, peerAddressList, infoHash, peerID)
 
-	log.Println("Waiting for termination signal...")
 	<-ctx.Done()
-	log.Printf("Program exiting. Context error: %v", ctx.Err())
+	log.Printf("Exiting. Context error: %v", ctx.Err())
+}
+
+// logging sets up a file for logging
+func logging() (*os.File, error) {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
+	logFile, err := os.OpenFile("app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to open log file: %v", err)
+	}
+	return logFile, nil
 }
 
 // parseArgs handles command-line argument parsing and validation
@@ -109,7 +110,7 @@ func getPeers(torrentFile *torrent.Torrent, infoHash []byte, peerID []byte) ([]s
 }
 
 // peerManager establishes connections to each peer in the peer list concurrently
-func peerManager(pm *download.PieceManager, ctx context.Context, peerIDList, peerAddressList []string, infoHash, clientID []byte) {
+func peerManager(pm *common.PieceManager, ctx context.Context, peerIDList, peerAddressList []string, infoHash, clientID []byte) {
 	var wg sync.WaitGroup
 
 	for i := range peerAddressList {
