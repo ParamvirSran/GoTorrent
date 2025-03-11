@@ -3,7 +3,6 @@ package peers
 import (
 	"bytes"
 	"encoding/binary"
-	"fmt"
 )
 
 // MessageID represents different types of messages in the Peer Wire Protocol
@@ -85,29 +84,4 @@ func PieceMessage(index, begin uint32, block []byte) []byte {
 	binary.Write(buf, binary.BigEndian, begin)
 	buf.Write(block)
 	return buf.Bytes()
-}
-
-// ParseMessage parses a length-prefixed message
-func ParseMessage(buf []byte) (Message, error) {
-	if len(buf) < 4 {
-		return Message{}, fmt.Errorf("buffer too short for length prefix")
-	}
-
-	length := binary.BigEndian.Uint32(buf[:4])
-	if length == 0 {
-		// Keep-alive message (no ID, no payload)
-		return Message{ID: nil, Payload: nil}, nil
-	}
-
-	if len(buf) < int(4+length) {
-		return Message{}, fmt.Errorf("buffer too short for declared length")
-	}
-
-	msg := Message{
-		ID:      new(MessageID),
-		Payload: buf[5 : 4+length], // extract payload after ID
-	}
-	*msg.ID = MessageID(buf[4]) // first byte after length is ID
-
-	return msg, nil
 }

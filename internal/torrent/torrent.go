@@ -6,6 +6,7 @@ import (
 	"os"
 
 	"github.com/ParamvirSran/GoTorrent/internal/bencode"
+	"github.com/ParamvirSran/GoTorrent/internal/download"
 )
 
 const (
@@ -31,7 +32,7 @@ type Torrent struct {
 	CreatedBy    string
 	Encoding     string
 	Info         *InfoDictionary
-	PieceMap     *PieceManager
+	PieceManager *download.PieceManager
 }
 
 type InfoDictionary struct {
@@ -91,7 +92,7 @@ func parseMetainfo(torrentDict map[string]interface{}) (*Torrent, error) {
 		return nil, fmt.Errorf("failed to parse info dictionary: %w", err)
 	}
 	torrentFile.Info = info
-	torrentFile.PieceMap = pieceMap
+	torrentFile.PieceManager = pieceMap
 
 	// Optional Fields
 	if comment, ok := torrentDict[_keyComment].(string); ok {
@@ -146,7 +147,7 @@ func parseAnnounce(torrentDict map[string]interface{}, torrentFile *Torrent) err
 }
 
 // parseInfo parses the info dictionary from the torrent file
-func parseInfo(infoDict map[string]interface{}) (*InfoDictionary, *PieceManager, error) {
+func parseInfo(infoDict map[string]interface{}) (*InfoDictionary, *download.PieceManager, error) {
 	info := &InfoDictionary{}
 	if err := parseNameAndPieceLength(infoDict, info); err != nil {
 		return nil, nil, err
@@ -160,12 +161,15 @@ func parseInfo(infoDict map[string]interface{}) (*InfoDictionary, *PieceManager,
 		return nil, nil, err
 	}
 
-	pieceMap := NewPieceMap()
+	// Initialize PieceManager
+	pieceMap := download.NewPieceManager()
+
+	// Populate the PieceManager with piece hashes
 	for i := 0; i < len(info.Pieces); i += 20 {
 		pieceHash := info.Pieces[i : i+20]
-		piece := Piece{Hash: pieceHash, isDownloaded: false}
-		pieceMap.AddPiece(i/20, piece)
+		pieceMap.AddPiece(i/20, pieceHash)
 	}
+
 	return info, pieceMap, nil
 }
 

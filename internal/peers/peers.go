@@ -9,6 +9,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	"github.com/ParamvirSran/GoTorrent/internal/download"
 )
 
 // Peer represents a connected peer
@@ -26,8 +28,8 @@ type PeerState struct {
 	peerInterested bool
 }
 
-// Worker manages a single peer connection
-func Worker(ctx context.Context, peerID string, infoHash []byte, clientID []byte, peerAddress string) error {
+// HandlePeerConnection manages a single peer connection
+func HandlePeerConnection(pm *download.PieceManager, ctx context.Context, peerID string, infoHash []byte, clientID []byte, peerAddress string) error {
 	peer := createPeer(peerID, peerAddress)
 
 	handshake, err := CreateHandshake(infoHash, clientID)
@@ -128,28 +130,29 @@ func Worker(ctx context.Context, peerID string, infoHash []byte, clientID []byte
 			case MsgHave:
 				pieceIndex := binary.BigEndian.Uint32(msg.Payload)
 				log.Printf("%s - Received HAVE message for piece %d\n", peer.address, pieceIndex)
+
 			case MsgBitfield:
-				fmt.Printf("%s - Received BITFIELD message: %x", peer.address, msg.Payload)
+				log.Printf("%s - Received BITFIELD message: %x", peer.address, msg.Payload)
 			case MsgRequest:
 				index := binary.BigEndian.Uint32(msg.Payload[0:4])
 				begin := binary.BigEndian.Uint32(msg.Payload[4:8])
 				length := binary.BigEndian.Uint32(msg.Payload[8:12])
-				fmt.Printf("%s - Received REQUEST message for index %d, begin %d, length %d\n", peer.address, index, begin, length)
+				log.Printf("%s - Received REQUEST message for index %d, begin %d, length %d\n", peer.address, index, begin, length)
 			case MsgPiece:
 				index := binary.BigEndian.Uint32(msg.Payload[0:4])
 				begin := binary.BigEndian.Uint32(msg.Payload[4:8])
 				block := msg.Payload[8:]
-				fmt.Printf("%s - Received PIECE message for index %d, begin %d, block length %d\n", peer.address, index, begin, len(block))
+				log.Printf("%s - Received PIECE message for index %d, begin %d, block length %d\n", peer.address, index, begin, len(block))
 			case MsgCancel:
 				index := binary.BigEndian.Uint32(msg.Payload[0:4])
 				begin := binary.BigEndian.Uint32(msg.Payload[4:8])
 				length := binary.BigEndian.Uint32(msg.Payload[8:12])
-				fmt.Printf("%s - Received CANCEL message for index %d, begin %d, length %d\n", peer.address, index, begin, length)
+				log.Printf("%s - Received CANCEL message for index %d, begin %d, length %d\n", peer.address, index, begin, length)
 			case MsgPort:
 				port := binary.BigEndian.Uint16(msg.Payload)
-				fmt.Printf("%s - Received PORT message with port %d\n", peer.address, port)
+				log.Printf("%s - Received PORT message with port %d\n", peer.address, port)
 			default:
-				fmt.Printf("%s - Received unknown message ID %d\n", peer.address, *msg.ID)
+				log.Printf("%s - Received unknown message ID %d\n", peer.address, *msg.ID)
 			}
 
 			// Disconnect peer if no keep-alive received in 2 mins
@@ -181,13 +184,19 @@ func ReadMessage(conn net.Conn) (Message, error) {
 	if err != nil {
 		return Message{}, err
 	}
-
-	return ParseMessage(buf)
+	messageId := MessageID(buf[0])
+	message := Message{
+		ID:      &messageId,
+		Payload: buf[1:],
+	}
+	return message, nil
 }
 
 // SendMessage sends a message over a connection
 func SendMessage(conn net.Conn, msg []byte) error {
+	log.Printf("We are sending message (%x) to Peer (%s)", msg, conn.RemoteAddr())
 	_, err := conn.Write(msg)
+	log.Printf("Error (%v) when sending to Peer (%s)", err, conn.RemoteAddr())
 	return err
 }
 

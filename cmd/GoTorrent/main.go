@@ -9,6 +9,7 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/ParamvirSran/GoTorrent/internal/download"
 	"github.com/ParamvirSran/GoTorrent/internal/peers"
 	"github.com/ParamvirSran/GoTorrent/internal/torrent"
 )
@@ -19,37 +20,42 @@ const (
 	_maxWorkers  = 3
 )
 
+var pieceDownloadWorkerPool = make(chan struct{}, _maxWorkers) // Global worker pool for downloading pieces
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 
 	logFile, err := os.OpenFile("app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		log.Fatalf("Failed to open log file: %v", err)
+		fmt.Printf("Failed to open log file: %v", err)
+		os.Exit(1)
 	}
 	defer logFile.Close()
 	log.SetOutput(logFile)
+	log.Println("Starting")
 
 	torrentPath := parseArgs()
 	torrentFile, infoHash, peerID, err := initializeTorrent(torrentPath)
 	if err != nil {
-		log.Fatalf("Failed to initialize torrent: %v", err)
+		fmt.Printf("Failed to initialize torrent: %v", err)
+		os.Exit(1)
 	}
 	log.Printf("Infohash - %x", infoHash)
 	log.Printf("PeerID - %s", peerID)
 
 	peerIDList, peerAddressList, err := getPeers(torrentFile, infoHash, peerID)
 	if err != nil {
-		log.Fatalf("Failed to get peers: %v", err)
+		fmt.Printf("Failed to get peers: %v", err)
+		os.Exit(1)
 	}
 	log.Printf("PeerID List - %v", peerIDList)
 	log.Printf("PeerAddress List - %v", peerAddressList)
 
-	// Graceful shutdown handling
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
 	log.Println("Starting peer connections...")
-	go workerManager(ctx, peerIDList, peerAddressList, infoHash, peerID)
+	go peerManager(torrentFile.PieceManager, ctx, peerIDList, peerAddressList, infoHash, peerID)
 
 	log.Println("Waiting for termination signal...")
 	<-ctx.Done()
@@ -102,29 +108,30 @@ func getPeers(torrentFile *torrent.Torrent, infoHash []byte, peerID []byte) ([]s
 	return peerIDList, peerAddressList, nil
 }
 
-// workerManager establishes connections to each peer in the peer list concurrently
-func workerManager(ctx context.Context, peerIDList, peerAddressList []string, infoHash, clientID []byte) {
+// peerManager establishes connections to each peer in the peer list concurrently
+func peerManager(pm *download.PieceManager, ctx context.Context, peerIDList, peerAddressList []string, infoHash, clientID []byte) {
 	var wg sync.WaitGroup
-	workerPool := make(chan struct{}, _maxWorkers)
+
 	for i := range peerAddressList {
 		select {
 		case <-ctx.Done():
+			log.Println("Context canceled, stopping peer connections.")
 			return
-		case workerPool <- struct{}{}: // Acquire worker slot
+		default:
+			wg.Add(1)
+			// Start a new peer handler
+			go func(peerID, peerAddress string) {
+				defer wg.Done()
+
+				err := peers.HandlePeerConnection(pm, ctx, peerID, infoHash, clientID, peerAddress)
+				if err != nil {
+					log.Printf("Failed with Peer: %s - %v", peerAddress, err)
+				} else {
+					log.Printf("Done with Peer: %s", peerAddress)
+				}
+			}(peerIDList[i], peerAddressList[i])
 		}
-
-		wg.Add(1)
-		go func(peerID, peerAddress string) {
-			defer wg.Done()
-			defer func() { <-workerPool }() // Release slot
-
-			err := peers.Worker(ctx, peerID, infoHash, clientID, peerAddress)
-			if err != nil {
-				log.Printf("Failed with Peer: %s - %v", peerAddress, err)
-			} else {
-				log.Printf("Done with Peer: %s", peerAddress)
-			}
-		}(peerIDList[i], peerAddressList[i])
 	}
 	wg.Wait()
+	log.Println("All peer connections finished.")
 }
