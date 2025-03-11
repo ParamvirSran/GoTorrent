@@ -37,7 +37,7 @@ func newTrackerClient(config *TrackerConfig) *http.Client {
 }
 
 // ContactTrackers tries to contact multiple trackers and gather peers
-func ContactTrackers(trackers []string, infoHash, peerID, event string, uploaded, downloaded, left, port int) ([]string, []string, error) {
+func ContactTrackers(trackers []string, infoHash, peerID, event string, uploaded, downloaded, left int, port string) ([]string, []string, error) {
 	var peer_address_list []string
 	var peerID_list []string
 
@@ -59,7 +59,7 @@ func ContactTrackers(trackers []string, infoHash, peerID, event string, uploaded
 			peer_address_list = append(peer_address_list, tracker_peerIP_list...)
 
 			unknown_peerID_list := make([]string, len(tracker_peerIP_list))
-			for i := 0; i < len(tracker_peerIP_list); i++ {
+			for i := range tracker_peerIP_list {
 				unknown_peerID_list[i] = ""
 			}
 			peerID_list = append(peerID_list, unknown_peerID_list...)
@@ -103,7 +103,7 @@ func GeneratePeerID() (string, error) {
 }
 
 // GetInfohash calculates the SHA-1 hash of the bencoded "info" dictionary
-func GetInfohash(info InfoDictionary) ([]byte, error) {
+func GetInfohash(info *InfoDictionary) ([]byte, error) {
 	infoMap := make(map[string]interface{})
 	infoMap["name"] = info.Name
 	infoMap["piece length"] = info.PieceLength
@@ -115,16 +115,18 @@ func GetInfohash(info InfoDictionary) ([]byte, error) {
 	} else {
 		// Multi-file case
 		var files []interface{}
-		for _, file := range info.Files {
-			pathInterfaceList := make([]interface{}, len(file.Path))
-			for i, p := range file.Path {
-				pathInterfaceList[i] = p
+		if fileList := info.Files; fileList != nil {
+			for _, file := range *fileList {
+				pathInterfaceList := make([]interface{}, len(file.Path))
+				for i, p := range file.Path {
+					pathInterfaceList[i] = p
+				}
+				fileMap := map[string]interface{}{
+					"length": file.Length,
+					"path":   pathInterfaceList,
+				}
+				files = append(files, fileMap)
 			}
-			fileMap := map[string]interface{}{
-				"length": file.Length,
-				"path":   pathInterfaceList,
-			}
-			files = append(files, fileMap)
 		}
 		infoMap["files"] = files
 	}
@@ -140,7 +142,7 @@ func GetInfohash(info InfoDictionary) ([]byte, error) {
 }
 
 // buildAnnounceURL creates the announcement URL for sending to trackers
-func buildAnnounceURL(baseURL, infoHash, peerID, event string, uploaded, downloaded, left, port int) (string, error) {
+func buildAnnounceURL(baseURL, infoHash, peerID, event string, uploaded, downloaded, left int, port string) (string, error) {
 	// validate mandatory parameters
 	if baseURL == "" || infoHash == "" || peerID == "" {
 		return "", fmt.Errorf("missing required parameters: baseURL, infoHash, or peerID")
@@ -156,7 +158,7 @@ func buildAnnounceURL(baseURL, infoHash, peerID, event string, uploaded, downloa
 	params := url.Values{}
 	addQueryParam(params, "info_hash", infoHash)
 	addQueryParam(params, "peer_id", peerID)
-	addQueryParam(params, "port", strconv.Itoa(port))
+	addQueryParam(params, "port", port)
 	addQueryParam(params, "uploaded", strconv.Itoa(uploaded))
 	addQueryParam(params, "downloaded", strconv.Itoa(downloaded))
 	addQueryParam(params, "left", strconv.Itoa(left))
@@ -217,7 +219,7 @@ func parseTrackerResponse(response []byte) (map[string]interface{}, error) {
 }
 
 // extractPeersFromTracker sends a request to the tracker and extracts peers
-func extractPeersFromTracker(trackerURL, infoHash, peerID, event string, uploaded, downloaded, left, port int) ([]string, []string, error) {
+func extractPeersFromTracker(trackerURL, infoHash, peerID, event string, uploaded, downloaded, left int, port string) ([]string, []string, error) {
 	requestURL, err := buildAnnounceURL(trackerURL, infoHash, peerID, event, uploaded, downloaded, left, port)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error building announce URL: %w", err)

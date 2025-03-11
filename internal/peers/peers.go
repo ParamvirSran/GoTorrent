@@ -26,8 +26,8 @@ type PeerState struct {
 	peerInterested bool
 }
 
-// HandlePeerConnection manages a single peer connection
-func HandlePeerConnection(peerID string, infoHash []byte, clientID []byte, peerAddress string) error {
+// Worker manages a single peer connection
+func Worker(ctx context.Context, peerID string, infoHash []byte, clientID []byte, peerAddress string) error {
 	peer := createPeer(peerID, peerAddress)
 
 	handshake, err := CreateHandshake(infoHash, clientID)
@@ -129,7 +129,7 @@ func HandlePeerConnection(peerID string, infoHash []byte, clientID []byte, peerA
 				pieceIndex := binary.BigEndian.Uint32(msg.Payload)
 				log.Printf("%s - Received HAVE message for piece %d\n", peer.address, pieceIndex)
 			case MsgBitfield:
-				fmt.Println("%s - Received BITFIELD message:", peer.address, msg.Payload)
+				fmt.Printf("%s - Received BITFIELD message: %x", peer.address, msg.Payload)
 			case MsgRequest:
 				index := binary.BigEndian.Uint32(msg.Payload[0:4])
 				begin := binary.BigEndian.Uint32(msg.Payload[4:8])

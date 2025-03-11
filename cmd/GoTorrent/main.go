@@ -14,66 +14,52 @@ import (
 )
 
 const (
-	_defaultPort = 6881
+	_defaultPort = "6881"
 	_startEvent  = "started"
-	_maxWorkers  = 10
+	_maxWorkers  = 3
 )
 
 func main() {
-	// Set up logging
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+
 	logFile, err := os.OpenFile("app.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to open log file: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Failed to open log file: %v", err)
 	}
 	defer logFile.Close()
-	log.SetFlags(log.LstdFlags | log.Lshortfile) // Add timestamps and file info
 	log.SetOutput(logFile)
 
-	// Parse torrent file
 	torrentPath := parseArgs()
 	torrentFile, infoHash, peerID, err := initializeTorrent(torrentPath)
 	if err != nil {
 		log.Fatalf("Failed to initialize torrent: %v", err)
 	}
+	log.Printf("Infohash - %x", infoHash)
+	log.Printf("PeerID - %s", peerID)
 
 	peerIDList, peerAddressList, err := getPeers(torrentFile, infoHash, peerID)
 	if err != nil {
 		log.Fatalf("Failed to get peers: %v", err)
 	}
+	log.Printf("PeerID List - %v", peerIDList)
+	log.Printf("PeerAddress List - %v", peerAddressList)
 
-	// Context for graceful shutdown
+	// Graceful shutdown handling
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 
-	// Start peer connections
-	var wg sync.WaitGroup
-	peerStatusChan := make(chan string, len(peerAddressList))
+	log.Println("Starting peer connections...")
+	go workerManager(ctx, peerIDList, peerAddressList, infoHash, peerID)
 
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		connectToPeers(ctx, peerIDList, peerAddressList, infoHash, peerID, peerStatusChan)
-	}()
-
-	// Receive peer statuses
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for status := range peerStatusChan {
-			fmt.Println("Peer status:", status)
-		}
-	}()
-
-	// Wait for all routines to finish
-	wg.Wait()
-	fmt.Println("Program terminated successfully")
+	log.Println("Waiting for termination signal...")
+	<-ctx.Done()
+	log.Printf("Program exiting. Context error: %v", ctx.Err())
 }
 
 // parseArgs handles command-line argument parsing and validation
 func parseArgs() string {
 	if len(os.Args) < 2 {
-		fmt.Fprintf(os.Stderr, "Usage: %s <torrent-file>\n", os.Args[0])
+		fmt.Printf("Usage: %s <torrent-file>", os.Args[0])
 		os.Exit(1)
 	}
 	return os.Args[1]
@@ -83,19 +69,16 @@ func parseArgs() string {
 func initializeTorrent(torrentPath string) (*torrent.Torrent, []byte, []byte, error) {
 	torrentFile, err := torrent.ParseTorrentFile(torrentPath)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error parsing torrent file (%s): %v", torrentPath, err)
+		return nil, nil, nil, fmt.Errorf("Error parsing Torrent File (%s): %w", torrentPath, err)
 	}
-
 	infoHash, err := torrent.GetInfohash(torrentFile.Info)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error getting info hash: %v", err)
+		return nil, nil, nil, fmt.Errorf("Error getting Infohash: %w", err)
 	}
-
 	peerID, err := torrent.GeneratePeerID()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("error generating peer ID: %v", err)
+		return nil, nil, nil, fmt.Errorf("Error generating peerID: %w", err)
 	}
-
 	return torrentFile, infoHash, []byte(peerID), nil
 }
 
@@ -103,35 +86,29 @@ func initializeTorrent(torrentPath string) (*torrent.Torrent, []byte, []byte, er
 func getPeers(torrentFile *torrent.Torrent, infoHash []byte, peerID []byte) ([]string, []string, error) {
 	trackers := torrent.GatherTrackers(torrentFile)
 	if len(trackers) == 0 {
-		return nil, nil, fmt.Errorf("no valid trackers found")
+		return nil, nil, fmt.Errorf("No valid trackers found")
 	}
-
 	left := torrentFile.Info.PieceLength * (len(torrentFile.Info.Pieces) / 20)
+	log.Printf("Left to Download: %v", left)
 	uploaded, downloaded := 0, 0
 
 	peerIDList, peerAddressList, err := torrent.ContactTrackers(trackers, string(infoHash), string(peerID), _startEvent, uploaded, downloaded, left, _defaultPort)
 	if err != nil {
-		return nil, nil, fmt.Errorf("error contacting trackers: %v", err)
+		return nil, nil, fmt.Errorf("Error contacting trackers: %w", err)
 	}
-
 	if len(peerAddressList) == 0 {
-		return nil, nil, fmt.Errorf("no peers found")
+		return nil, nil, fmt.Errorf("No peers found from trackers")
 	}
-
 	return peerIDList, peerAddressList, nil
 }
 
-// connectToPeers establishes connections to each peer in the peer list concurrently
-func connectToPeers(ctx context.Context, peerIDList, peerAddressList []string, infoHash, clientID []byte, peerStatusChan chan<- string) {
+// workerManager establishes connections to each peer in the peer list concurrently
+func workerManager(ctx context.Context, peerIDList, peerAddressList []string, infoHash, clientID []byte) {
 	var wg sync.WaitGroup
-	defer close(peerStatusChan)
-
 	workerPool := make(chan struct{}, _maxWorkers)
-
 	for i := range peerAddressList {
 		select {
 		case <-ctx.Done():
-			// Exit early if context is canceled
 			return
 		case workerPool <- struct{}{}: // Acquire worker slot
 		}
@@ -141,21 +118,13 @@ func connectToPeers(ctx context.Context, peerIDList, peerAddressList []string, i
 			defer wg.Done()
 			defer func() { <-workerPool }() // Release slot
 
-			select {
-			case <-ctx.Done():
-				peerStatusChan <- "Canceled: " + peerAddress
-				return
-			default:
-			}
-
-			err := peers.HandlePeerConnection(peerID, infoHash, clientID, peerAddress)
+			err := peers.Worker(ctx, peerID, infoHash, clientID, peerAddress)
 			if err != nil {
-				peerStatusChan <- fmt.Sprintf("Failed with Peer: %s - %v", peerAddress, err)
+				log.Printf("Failed with Peer: %s - %v", peerAddress, err)
 			} else {
-				peerStatusChan <- "Done with Peer: " + peerAddress
+				log.Printf("Done with Peer: %s", peerAddress)
 			}
 		}(peerIDList[i], peerAddressList[i])
 	}
-
 	wg.Wait()
 }

@@ -30,7 +30,8 @@ type Torrent struct {
 	Comment      string
 	CreatedBy    string
 	Encoding     string
-	Info         InfoDictionary
+	Info         *InfoDictionary
+	PieceMap     *PieceManager
 }
 
 type InfoDictionary struct {
@@ -39,7 +40,7 @@ type InfoDictionary struct {
 	Private     *int
 	Name        string
 	Length      int64
-	Files       []File
+	Files       *[]File
 }
 
 type File struct {
@@ -52,7 +53,7 @@ type File struct {
 func ParseTorrentFile(torrentPath string) (*Torrent, error) {
 	content, err := os.ReadFile(torrentPath)
 	if err != nil {
-		return nil, fmt.Errorf("error reading .torrent file: %v", err)
+		return nil, fmt.Errorf("error reading .torrent file: %w", err)
 	}
 
 	reader := bytes.NewReader(content)
@@ -66,12 +67,12 @@ func ParseTorrentFile(torrentPath string) (*Torrent, error) {
 		return nil, fmt.Errorf("invalid torrent file format: expected a dictionary but got %T", data)
 	}
 
-	parsedFile, err := parseMetainfo(torrentDict)
+	torrent, err := parseMetainfo(torrentDict)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing metainfo: %v", err)
 	}
 
-	return parsedFile, nil
+	return torrent, nil
 }
 
 // parseMetainfo parses the metainfo dictionary
@@ -85,11 +86,12 @@ func parseMetainfo(torrentDict map[string]interface{}) (*Torrent, error) {
 	if !ok {
 		return nil, fmt.Errorf("info dictionary missing or of incorrect type")
 	}
-	info, err := parseInfo(infoDict)
+	info, pieceMap, err := parseInfo(infoDict)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse info dictionary: %w", err)
 	}
-	torrentFile.Info = *info
+	torrentFile.Info = info
+	torrentFile.PieceMap = pieceMap
 
 	// Optional Fields
 	if comment, ok := torrentDict[_keyComment].(string); ok {
@@ -144,21 +146,27 @@ func parseAnnounce(torrentDict map[string]interface{}, torrentFile *Torrent) err
 }
 
 // parseInfo parses the info dictionary from the torrent file
-func parseInfo(infoDict map[string]interface{}) (*InfoDictionary, error) {
+func parseInfo(infoDict map[string]interface{}) (*InfoDictionary, *PieceManager, error) {
 	info := &InfoDictionary{}
 	if err := parseNameAndPieceLength(infoDict, info); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if err := parsePiecesField(infoDict, info); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	if err := parseLengthOrFiles(infoDict, info); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	return info, nil
+	pieceMap := NewPieceMap()
+	for i := 0; i < len(info.Pieces); i += 20 {
+		pieceHash := info.Pieces[i : i+20]
+		piece := Piece{Hash: pieceHash, isDownloaded: false}
+		pieceMap.AddPiece(i/20, piece)
+	}
+	return info, pieceMap, nil
 }
 
 // parseNameAndPieceLength parses the name and piece length from the info dictionary
@@ -201,7 +209,7 @@ func parseLengthOrFiles(infoDict map[string]interface{}, info *InfoDictionary) e
 		if err != nil {
 			return fmt.Errorf("failed to parse files: %w", err)
 		}
-		info.Files = parsedFiles
+		info.Files = &parsedFiles
 	} else {
 		return fmt.Errorf("neither %s nor %s field found. Torrent may be missing fields", _keyLength, _keyFiles)
 	}
