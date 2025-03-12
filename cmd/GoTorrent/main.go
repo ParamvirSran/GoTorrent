@@ -40,8 +40,6 @@ func main() {
 		fmt.Printf("Failed to get peers: %v", err)
 		os.Exit(1)
 	}
-	log.Printf("PeerID List - %v", len(peerIDList))
-	log.Printf("PeerAddress List - %v", len(peerAddressList))
 
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
@@ -95,8 +93,9 @@ func getPeers(torrentFile *torrent.Torrent, infoHash []byte, peerID []byte) ([]s
 	if len(trackers) == 0 {
 		return nil, nil, fmt.Errorf("No valid trackers found")
 	}
+
 	left := torrentFile.Info.PieceLength * (len(torrentFile.Info.Pieces) / 20)
-	log.Printf("Left to Download: %v", left)
+	log.Printf("Torrent Stats - Piece Count: %d - Piece Size: %d - Left to Download: %d", len(torrentFile.Info.Pieces)/20, torrentFile.Info.PieceLength, left)
 	uploaded, downloaded := 0, 0
 
 	peerIDList, peerAddressList, err := torrent.ContactTrackers(trackers, string(infoHash), string(peerID), _startEvent, uploaded, downloaded, left, _defaultPort)
@@ -134,5 +133,5 @@ func peerManager(pm *common.PieceManager, ctx context.Context, peerIDList, peerA
 		}
 	}
 	wg.Wait()
-	log.Println("All peer connections finished.")
+	log.Println("All peer connections finished. Peer manager finished")
 }
