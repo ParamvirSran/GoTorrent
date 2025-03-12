@@ -3,31 +3,36 @@ package common
 import (
 	"bytes"
 	"crypto/sha1"
-	"errors"
+	"fmt"
 	"log"
 	"sync"
 )
 
 // Piece represents a torrent piece
 type Piece struct {
-	Hash         []byte  // the hash for this piece sourced from the .torrent file
-	Data         *[]byte // the downloaded data for this piece received from a peer that claims they have the data for this piece
-	isDownloaded bool    // flag once piece is downloaded and verified
-	isClaimed    bool    // a worker claims the piece and proceeds to download the piece from a peer and no other worker can handle the piece until unclaimed
+	Hash           []byte  // the hash for this piece sourced from the .torrent file
+	Data           *[]byte // the downloaded data for this piece received from a peer that claims they have the data for this piece
+	isDownloaded   bool    // flag once piece is downloaded and verified
+	isClaimed      bool    // a worker claims the piece and proceeds to download the piece from a peer and no other worker can handle the piece until unclaimed
+	failedAttempts int     // track failed verification attempts
 }
 
 // PieceManager tracks which pieces are downloaded
 type PieceManager struct {
 	pieces          map[int]*Piece // map of piece_index -> Piece struct
 	downloadedCount int            // reference of pieces downloaded and verified
-	mu              sync.Mutex     // lock for concurrent access
+	PieceCount      int
+	PieceSize       int
+	mu              sync.Mutex // lock for concurrent access
 }
 
 // NewPieceManager creates a piece manager and returns a pointer to it
-func NewPieceManager() *PieceManager {
+func NewPieceManager(pieceCount, pieceLength int) *PieceManager {
 	return &PieceManager{
 		pieces:          make(map[int]*Piece),
 		downloadedCount: 0,
+		PieceCount:      pieceCount,
+		PieceSize:       pieceLength,
 	}
 }
 
@@ -44,10 +49,12 @@ func (pm *PieceManager) RequeuePiece(index int) {
 	defer pm.mu.Unlock()
 
 	if piece, exists := pm.pieces[index]; exists {
+		if piece.isDownloaded {
+			pm.downloadedCount--
+		}
 		piece.isDownloaded = false
 		piece.isClaimed = false
 		piece.Data = nil // Clear the pointer to avoid memory leaks
-		pm.downloadedCount--
 		log.Printf("Piece %d re-queued for download", index)
 	}
 }
@@ -75,7 +82,9 @@ func (pm *PieceManager) MarkPieceDownloaded(index int, data []byte) {
 
 	if piece, exists := pm.pieces[index]; exists {
 		if !piece.isDownloaded {
-			piece.Data = &data
+			dataCopy := make([]byte, len(data))
+			copy(dataCopy, data)
+			piece.Data = &dataCopy
 			piece.isDownloaded = true
 			piece.isClaimed = false
 			pm.downloadedCount++
@@ -90,13 +99,12 @@ func (pm *PieceManager) VerifyPiece(index int) error {
 	defer pm.mu.Unlock()
 
 	piece, exists := pm.pieces[index]
-
 	if !exists {
-		return errors.New("Piece we are attempting to verify does not exist")
+		return fmt.Errorf("piece %d does not exist", index)
 	}
 
 	if !piece.isDownloaded || piece.Data == nil {
-		return errors.New("Piece we are attempting to verify is not downloaded/data is nil")
+		return fmt.Errorf("piece %d is not downloaded or data is nil", index)
 	}
 
 	hasher := sha1.New()
@@ -104,9 +112,15 @@ func (pm *PieceManager) VerifyPiece(index int) error {
 	computedHash := hasher.Sum(nil)
 
 	if !bytes.Equal(computedHash, piece.Hash) {
-		return errors.New("Piece we are verifying does not match the expected hash from .torrent file")
+		piece.failedAttempts++
+		if piece.failedAttempts >= 3 { // Threshold for failed attempts
+			pm.RequeuePiece(index)
+			return fmt.Errorf("piece %d failed verification %d times, re-queued", index, piece.failedAttempts)
+		}
+		return fmt.Errorf("piece %d hash does not match the expected hash", index)
 	}
 
+	piece.failedAttempts = 0 // Reset failed attempts on successful verification
 	return nil
 }
 
@@ -119,6 +133,9 @@ func (pm *PieceManager) IsDownloadComplete() bool {
 		log.Println("Download complete!")
 		return true
 	}
+
+	log.Printf("Downloaded Pieces: %d\nTotal Pieces: %d", pm.downloadedCount, len(pm.pieces))
+	log.Printf("Left: %d", len(pm.pieces)-pm.downloadedCount)
 	return false
 }
 
@@ -129,11 +146,11 @@ func (pm *PieceManager) GetPieceData(index int) ([]byte, error) {
 
 	piece, exists := pm.pieces[index]
 	if !exists {
-		return nil, errors.New("piece does not exist for which we are trying to get the data for")
+		return nil, fmt.Errorf("piece %d does not exist", index)
 	}
 
 	if !piece.isDownloaded || piece.Data == nil {
-		return nil, errors.New("piece not downloaded when trying to retreive its data")
+		return nil, fmt.Errorf("piece %d is not downloaded or data is nil", index)
 	}
 
 	return *piece.Data, nil

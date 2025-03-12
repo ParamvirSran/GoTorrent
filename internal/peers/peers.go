@@ -3,13 +3,22 @@ package peers
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
-	"github.com/ParamvirSran/GoTorrent/internal/common"
 	"io"
 	"log"
 	"net"
 	"sync"
 	"time"
+
+	"github.com/ParamvirSran/GoTorrent/internal/common"
+)
+
+const (
+	HandshakeResponseLength = 68
+	KeepAliveInterval       = 30 * time.Second
+	PeerTimeout             = 120 * time.Second
+	BlockSize               = 16384
 )
 
 // Peer represents a connected peer
@@ -44,22 +53,18 @@ func HandlePeerConnection(pm *common.PieceManager, ctx context.Context, peerID s
 	}
 	defer conn.Close()
 
-	// Send handshake
 	if err := sendHandshake(conn, handshake); err != nil {
 		return err
 	}
 
-	// Read handshake response
-	response := make([]byte, 68)
-	if err := receiveHandshakeResponse(peerID, conn, response, infoHash); err != nil {
+	if err := receiveHandshakeResponse(peerID, conn, infoHash); err != nil {
 		return err
 	}
 
-	// Start keep-alive goroutine
-	go startKeepAlive(peerContext, conn)
+	stopKeepAlive := startKeepAlive(peerContext, conn)
+	defer stopKeepAlive()
 
-	// Message processing loop
-	return processMessages(peerContext, conn, peer, pm, time.Now())
+	return processMessages(peerContext, conn, peer, pm)
 }
 
 // connectToPeer establishes a connection to the peer
@@ -81,8 +86,9 @@ func sendHandshake(conn net.Conn, handshake []byte) error {
 }
 
 // receiveHandshakeResponse reads and validates the handshake response from the peer
-func receiveHandshakeResponse(peerID string, conn net.Conn, response []byte, infoHash []byte) error {
-	conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+func receiveHandshakeResponse(peerID string, conn net.Conn, infoHash []byte) error {
+	response := make([]byte, HandshakeResponseLength)
+	conn.SetReadDeadline(time.Now().Add(PeerTimeout))
 	n, err := conn.Read(response)
 	if err != nil {
 		return fmt.Errorf("failed to read handshake response: %v", err)
@@ -96,54 +102,52 @@ func receiveHandshakeResponse(peerID string, conn net.Conn, response []byte, inf
 
 // startKeepAlive starts a goroutine to send keep-alive messages to the peer
 func startKeepAlive(ctx context.Context, conn net.Conn) func() {
-	ctx, cancel := context.WithCancel(ctx) // Create a cancel function
+	ctx, cancel := context.WithCancel(ctx)
 	var once sync.Once
 	go func() {
+		ticker := time.NewTicker(KeepAliveInterval)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-ctx.Done():
 				return
-			default:
-				time.Sleep(30 * time.Second) // Send keep-alive every 30 sec
-				if _, err := conn.Write([]byte{0}); err != nil {
-					log.Println("Error sending keep-alive:", err)
-					once.Do(func() { cancel() }) // Ensure cancel is called once
+			case <-ticker.C:
+				if _, err := conn.Write(KeepAliveMessage()); err != nil {
+					log.Printf("Error sending keep-alive to peer %s: %v", conn.RemoteAddr(), err)
+					once.Do(cancel)
 					return
 				}
 			}
 		}
 	}()
-	return func() {
-		once.Do(func() { cancel() }) // Ensure cleanup
-	}
+	return func() { once.Do(cancel) }
 }
 
 // processMessages processes incoming messages from the peer
-func processMessages(ctx context.Context, conn net.Conn, peer *Peer, pm *common.PieceManager, lastKeepAlive time.Time) error {
+func processMessages(ctx context.Context, conn net.Conn, peer *Peer, pm *common.PieceManager) error {
+	lastActivity := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
 			log.Printf("Disconnecting from peer: %s", peer.address)
 			return nil
 		default:
-			conn.SetReadDeadline(time.Now().Add(120 * time.Second))
+			conn.SetReadDeadline(time.Now().Add(PeerTimeout))
 			msg, err := ReadMessage(conn)
 			if err != nil {
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					continue
 				}
-				log.Printf("Error reading message: %v", err)
-				return err
+				return fmt.Errorf("error reading message: %v", err)
 			}
 
 			if msg.ID != nil {
 				handleMessage(conn, ctx, pm, peer, msg)
+				lastActivity = time.Now()
 			}
 
-			// Timeout check
-			if time.Since(lastKeepAlive) > 120*time.Second {
-				log.Printf("Peer %s timed out", peer.address)
-				return nil
+			if time.Since(lastActivity) > PeerTimeout {
+				return fmt.Errorf("peer %s timed out", peer.address)
 			}
 		}
 	}
@@ -162,9 +166,9 @@ func handleMessage(conn net.Conn, ctx context.Context, pm *common.PieceManager, 
 		peer.peerState.peerInterested = false
 	case MsgHave:
 		pieceIndex := binary.BigEndian.Uint32(msg.Payload)
-		log.Printf("%s - Received HAVE message for piece %d\n", peer.address, pieceIndex)
+		log.Printf("%s - Received HAVE message for piece %d", peer.address, pieceIndex)
 		if pm.ClaimPiece(int(pieceIndex)) {
-			go Worker(ctx, pm, pieceIndex, conn)
+			go worker(peer, ctx, pm, pieceIndex, conn)
 		}
 	case MsgBitfield:
 		log.Printf("%s - Received BITFIELD message: %x", peer.address, msg.Payload)
@@ -172,48 +176,93 @@ func handleMessage(conn net.Conn, ctx context.Context, pm *common.PieceManager, 
 		index := binary.BigEndian.Uint32(msg.Payload[0:4])
 		begin := binary.BigEndian.Uint32(msg.Payload[4:8])
 		length := binary.BigEndian.Uint32(msg.Payload[8:12])
-		log.Printf("%s - Received REQUEST message for index %d, begin %d, length %d\n", peer.address, index, begin, length)
+		log.Printf("%s - Received REQUEST message for index %d, begin %d, length %d", peer.address, index, begin, length)
 	case MsgPiece:
 		index := binary.BigEndian.Uint32(msg.Payload[0:4])
 		begin := binary.BigEndian.Uint32(msg.Payload[4:8])
 		block := msg.Payload[8:]
-		log.Printf("%s - Received PIECE message for index %d, begin %d, block length %d\n", peer.address, index, begin, len(block))
+		log.Printf("%s - Received PIECE message for index %d, begin %d, block length %d", peer.address, index, begin, len(block))
 	case MsgCancel:
 		index := binary.BigEndian.Uint32(msg.Payload[0:4])
 		begin := binary.BigEndian.Uint32(msg.Payload[4:8])
 		length := binary.BigEndian.Uint32(msg.Payload[8:12])
-		log.Printf("%s - Received CANCEL message for index %d, begin %d, length %d\n", peer.address, index, begin, length)
+		log.Printf("%s - Received CANCEL message for index %d, begin %d, length %d", peer.address, index, begin, length)
 	case MsgPort:
 		port := binary.BigEndian.Uint16(msg.Payload)
-		log.Printf("%s - Received PORT message with port %d\n", peer.address, port)
+		log.Printf("%s - Received PORT message with port %d", peer.address, port)
 	default:
-		log.Printf("%s - Received unknown message ID %d\n", peer.address, *msg.ID)
+		log.Printf("%s - Received unknown message ID %d", peer.address, *msg.ID)
 	}
 }
 
-func Worker(ctx context.Context, pm *common.PieceManager, index uint32, conn net.Conn) {
-	var block_size uint32 = 16384
-	var pieceOffset uint32 = 0
-	requestMessage := RequestMessage(index, pieceOffset, block_size)
-	_, err := conn.Write(requestMessage)
-	if err != nil {
-		log.Println("request writing err", err)
-		return
+// worker downloads a piece from the peer
+func worker(peer *Peer, ctx context.Context, pm *common.PieceManager, index uint32, conn net.Conn) {
+	var offset uint32 = 0
+	piece := make([]byte, pm.PieceSize)
+
+	for offset < uint32(pm.PieceSize) {
+		select {
+		case <-ctx.Done():
+			log.Printf("worker: context finished early: piece (%d) from peer (%s)", index, conn.RemoteAddr())
+			return
+		default:
+			// Calculate the block size (usually 16 KB, but smaller for the last block)
+			blockSize := uint32(BlockSize)
+			if offset+blockSize > uint32(pm.PieceSize) {
+				blockSize = uint32(pm.PieceSize) - offset
+			}
+
+			// Send a request for the block
+			// might need to send interested message and a unchoke meesage
+			request := RequestMessage(index, offset, blockSize)
+			if _, err := conn.Write(request); err != nil {
+				log.Printf("worker: Error sending request for piece %d, offset %d: %v", index, offset, err)
+				return
+			}
+
+			// Read the block response
+			msg, err := ReadMessage(conn)
+			if err != nil {
+				log.Printf("worker: Error reading block for piece %d, offset %d: %v", index, offset, err)
+				return
+			}
+
+			// Verify the block response
+			if *msg.ID != MsgPiece {
+				log.Printf("worker: Expected PIECE message, got message ID %d", *msg.ID)
+				break
+			}
+
+			// Copy the block into the piece
+			receivedIndex := binary.BigEndian.Uint32(msg.Payload[0:4])
+			receivedBegin := binary.BigEndian.Uint32(msg.Payload[4:8])
+			block := msg.Payload[8:]
+
+			if receivedIndex != index || receivedBegin != offset {
+				log.Printf("worker: Mismatch in received block: expected index %d, offset %d; got index %d, offset %d",
+					index, offset, receivedIndex, receivedBegin)
+				return
+			}
+
+			copy(piece[offset:offset+blockSize], block)
+			offset += blockSize
+		}
 	}
-	buf := make([]byte, block_size)
-	_, err = conn.Read(buf)
-	if err != nil {
-		log.Println("block err", err)
-		return
+
+	// Mark the piece as downloaded and verify it
+	pm.MarkPieceDownloaded(int(index), piece)
+	if err := pm.VerifyPiece(int(index)); err != nil {
+		log.Printf("worker: Verification failed for piece %d: %v", index, err)
+		pm.RequeuePiece(int(index))
+	} else {
+		log.Printf("worker: Successfully downloaded and verified piece %d from peer %s", index, conn.RemoteAddr())
 	}
-	log.Printf("Peer (%s) - Sent block for piece (%d) and block received is: %x", conn.RemoteAddr(), index, buf)
 }
 
 // ReadMessage reads a message from a connection
 func ReadMessage(conn net.Conn) (Message, error) {
 	var length uint32
-	err := binary.Read(conn, binary.BigEndian, &length)
-	if err != nil {
+	if err := binary.Read(conn, binary.BigEndian, &length); err != nil {
 		return Message{}, err
 	}
 
@@ -222,8 +271,7 @@ func ReadMessage(conn net.Conn) (Message, error) {
 	}
 
 	buf := make([]byte, length)
-	_, err = io.ReadFull(conn, buf)
-	if err != nil {
+	if _, err := io.ReadFull(conn, buf); err != nil {
 		return Message{}, err
 	}
 
@@ -232,14 +280,6 @@ func ReadMessage(conn net.Conn) (Message, error) {
 		ID:      &messageId,
 		Payload: buf[1:],
 	}, nil
-}
-
-// SendMessage sends a message over a connection
-func SendMessage(conn net.Conn, msg []byte) error {
-	log.Printf("Sending message (%x) to Peer (%s)", msg, conn.RemoteAddr())
-	_, err := conn.Write(msg)
-	log.Printf("Error (%v) when sending to Peer (%s)", err, conn.RemoteAddr())
-	return err
 }
 
 // createPeer initializes a new peer object

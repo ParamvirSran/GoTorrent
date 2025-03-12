@@ -104,7 +104,7 @@ func GeneratePeerID() (string, error) {
 
 // GetInfohash calculates the SHA-1 hash of the bencoded "info" dictionary
 func GetInfohash(info *InfoDictionary) ([]byte, error) {
-	infoMap := make(map[string]interface{})
+	infoMap := make(map[string]any)
 	infoMap["name"] = info.Name
 	infoMap["piece length"] = info.PieceLength
 	infoMap["pieces"] = string(info.Pieces)
@@ -114,14 +114,14 @@ func GetInfohash(info *InfoDictionary) ([]byte, error) {
 		infoMap["length"] = info.Length
 	} else {
 		// Multi-file case
-		var files []interface{}
+		var files []any
 		if fileList := info.Files; fileList != nil {
 			for _, file := range *fileList {
-				pathInterfaceList := make([]interface{}, len(file.Path))
+				pathInterfaceList := make([]any, len(file.Path))
 				for i, p := range file.Path {
 					pathInterfaceList[i] = p
 				}
-				fileMap := map[string]interface{}{
+				fileMap := map[string]any{
 					"length": file.Length,
 					"path":   pathInterfaceList,
 				}
@@ -202,13 +202,13 @@ func sendGetRequest(url string, client *http.Client) ([]byte, error) {
 }
 
 // parseTrackerResponse decodes the response from the tracker
-func parseTrackerResponse(response []byte) (map[string]interface{}, error) {
+func parseTrackerResponse(response []byte) (map[string]any, error) {
 	decoded, err := bencode.Decode(bytes.NewReader(response))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode tracker response: %w", err)
 	}
 
-	trackerResponse, ok := decoded.(map[string]interface{})
+	trackerResponse, ok := decoded.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("invalid tracker response format: expected dictionary but got %T", decoded)
 	}

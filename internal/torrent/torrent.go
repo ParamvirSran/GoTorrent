@@ -63,7 +63,7 @@ func ParseTorrentFile(torrentPath string) (*Torrent, error) {
 		return nil, fmt.Errorf("failed to decode torrent file: %w", err)
 	}
 
-	torrentDict, ok := data.(map[string]interface{})
+	torrentDict, ok := data.(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("invalid torrent file format: expected a dictionary but got %T", data)
 	}
@@ -77,22 +77,22 @@ func ParseTorrentFile(torrentPath string) (*Torrent, error) {
 }
 
 // parseMetainfo parses the metainfo dictionary
-func parseMetainfo(torrentDict map[string]interface{}) (*Torrent, error) {
+func parseMetainfo(torrentDict map[string]any) (*Torrent, error) {
 	torrentFile := &Torrent{}
 	if err := parseAnnounce(torrentDict, torrentFile); err != nil {
 		return nil, err
 	}
 
-	infoDict, ok := torrentDict[_keyInfo].(map[string]interface{})
+	infoDict, ok := torrentDict[_keyInfo].(map[string]any)
 	if !ok {
 		return nil, fmt.Errorf("info dictionary missing or of incorrect type")
 	}
-	info, pieceMap, err := parseInfo(infoDict)
+	info, pieceManager, err := parseInfo(infoDict)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse info dictionary: %w", err)
 	}
 	torrentFile.Info = info
-	torrentFile.PieceManager = pieceMap
+	torrentFile.PieceManager = pieceManager
 
 	// Optional Fields
 	if comment, ok := torrentDict[_keyComment].(string); ok {
@@ -119,16 +119,16 @@ func parseMetainfo(torrentDict map[string]interface{}) (*Torrent, error) {
 }
 
 // parseAnnounce parses the "announce" and "announce-list" fields
-func parseAnnounce(torrentDict map[string]interface{}, torrentFile *Torrent) error {
+func parseAnnounce(torrentDict map[string]any, torrentFile *Torrent) error {
 	if announce, ok := torrentDict[_keyAnnounce].(string); ok {
 		torrentFile.Announce = announce
 	} else {
 		return fmt.Errorf("%s URL missing or not a string", _keyAnnounce)
 	}
 
-	if announceList, ok := torrentDict[_keyAnnounceList].([]interface{}); ok {
+	if announceList, ok := torrentDict[_keyAnnounceList].([]any); ok {
 		for _, tier := range announceList {
-			if urlList, ok := tier.([]interface{}); ok {
+			if urlList, ok := tier.([]any); ok {
 				var urls []string
 				for _, url := range urlList {
 					if urlString, ok := url.(string); ok {
@@ -147,7 +147,7 @@ func parseAnnounce(torrentDict map[string]interface{}, torrentFile *Torrent) err
 }
 
 // parseInfo parses the info dictionary from the torrent file
-func parseInfo(infoDict map[string]interface{}) (*InfoDictionary, *common.PieceManager, error) {
+func parseInfo(infoDict map[string]any) (*InfoDictionary, *common.PieceManager, error) {
 	info := &InfoDictionary{}
 	if err := parseNameAndPieceLength(infoDict, info); err != nil {
 		return nil, nil, err
@@ -161,20 +161,23 @@ func parseInfo(infoDict map[string]interface{}) (*InfoDictionary, *common.PieceM
 		return nil, nil, err
 	}
 
+	pieceCount := len(info.Pieces) / 20
+	pieceLength := info.PieceLength
+
 	// Initialize PieceManager
-	pieceMap := common.NewPieceManager()
+	pieceManager := common.NewPieceManager(pieceCount, pieceLength)
 
 	// Populate the PieceManager with piece hashes
-	for i := 0; i < len(info.Pieces); i += 20 {
-		pieceHash := info.Pieces[i : i+20]
-		pieceMap.AddPiece(i/20, pieceHash)
+	for i := 0; i < pieceCount; i += 1 {
+		pieceHash := info.Pieces[i*20 : i*20+20]
+		pieceManager.AddPiece(i, pieceHash)
 	}
 
-	return info, pieceMap, nil
+	return info, pieceManager, nil
 }
 
 // parseNameAndPieceLength parses the name and piece length from the info dictionary
-func parseNameAndPieceLength(infoDict map[string]interface{}, info *InfoDictionary) error {
+func parseNameAndPieceLength(infoDict map[string]any, info *InfoDictionary) error {
 	name, ok := infoDict[_keyName].(string)
 	if !ok {
 		return fmt.Errorf("%s field missing or not a string", _keyName)
@@ -193,7 +196,7 @@ func parseNameAndPieceLength(infoDict map[string]interface{}, info *InfoDictiona
 }
 
 // parsePiecesField parses the "pieces" field
-func parsePiecesField(infoDict map[string]interface{}, info *InfoDictionary) error {
+func parsePiecesField(infoDict map[string]any, info *InfoDictionary) error {
 	pieces, ok := infoDict[_keyPieces].(string)
 	if !ok {
 		return fmt.Errorf("%s field missing or not a string", _keyPieces)
@@ -203,12 +206,12 @@ func parsePiecesField(infoDict map[string]interface{}, info *InfoDictionary) err
 }
 
 // parseLengthOrFiles parses the "length" or "files" field
-func parseLengthOrFiles(infoDict map[string]interface{}, info *InfoDictionary) error {
+func parseLengthOrFiles(infoDict map[string]any, info *InfoDictionary) error {
 	if length, ok := infoDict[_keyLength].(int); ok {
 		info.Length = int64(length)
 	} else if length, ok := infoDict[_keyLength].(int64); ok {
 		info.Length = length
-	} else if files, ok := infoDict[_keyFiles].([]interface{}); ok {
+	} else if files, ok := infoDict[_keyFiles].([]any); ok {
 		parsedFiles, err := parseFiles(files)
 		if err != nil {
 			return fmt.Errorf("failed to parse files: %w", err)
@@ -221,10 +224,10 @@ func parseLengthOrFiles(infoDict map[string]interface{}, info *InfoDictionary) e
 }
 
 // parseFiles parses the "files" field into a list of File objects
-func parseFiles(files []interface{}) ([]File, error) {
+func parseFiles(files []any) ([]File, error) {
 	var fileList []File
 	for _, file := range files {
-		fileDict, ok := file.(map[string]interface{})
+		fileDict, ok := file.(map[string]any)
 		if !ok {
 			return nil, fmt.Errorf("file entry is not a valid dictionary, got %T", file)
 		}
@@ -238,7 +241,7 @@ func parseFiles(files []interface{}) ([]File, error) {
 }
 
 // parseFile parses a single file entry
-func parseFile(fileDict map[string]interface{}) (File, error) {
+func parseFile(fileDict map[string]any) (File, error) {
 	var fileInfo File
 
 	if length, ok := fileDict[_keyLength].(int); ok {
@@ -249,7 +252,7 @@ func parseFile(fileDict map[string]interface{}) (File, error) {
 		return fileInfo, fmt.Errorf("file length missing or not a valid type")
 	}
 
-	if path, ok := fileDict["path"].([]interface{}); ok {
+	if path, ok := fileDict["path"].([]any); ok {
 		for _, p := range path {
 			if pStr, ok := p.(string); ok {
 				fileInfo.Path = append(fileInfo.Path, pStr)
