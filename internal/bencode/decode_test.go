@@ -77,13 +77,13 @@ func TestDecodeString(t *testing.T) {
 func TestDecodeList(t *testing.T) {
 	tests := []struct {
 		input    string
-		expected []interface{}
+		expected []any
 		hasError bool
 	}{
-		{"li123ei456ee", []interface{}{123, 456}, false},
-		{"l4:spam4:eggse", []interface{}{"spam", "eggs"}, false},
-		{"le", []interface{}{}, false}, // Empty list
-		{"li123ei45e", nil, true},      // Incomplete integer in list
+		{"li123ei456ee", []any{123, 456}, false},
+		{"l4:spam4:eggse", []any{"spam", "eggs"}, false},
+		{"le", []any{}, false},    // Empty list
+		{"li123ei45e", nil, true}, // Incomplete integer in list
 	}
 
 	for _, test := range tests {
@@ -98,7 +98,7 @@ func TestDecodeList(t *testing.T) {
 				if err != nil {
 					t.Errorf("unexpected error for input %s: %v", test.input, err)
 				} else {
-					resultList, ok := result.([]interface{})
+					resultList, ok := result.([]any)
 					if !ok {
 						t.Errorf("expected a list for input %s, but got %T", test.input, result)
 					} else if len(resultList) != len(test.expected) {
@@ -119,13 +119,13 @@ func TestDecodeList(t *testing.T) {
 func TestDecodeDict(t *testing.T) {
 	tests := []struct {
 		input    string
-		expected map[string]interface{}
+		expected map[string]any
 		hasError bool
 	}{
-		{"d3:cow3:moo4:spam4:eggse", map[string]interface{}{"cow": "moo", "spam": "eggs"}, false},
-		{"d4:bull3:cow3:cow3:mooe", map[string]interface{}{"bull": "cow", "cow": "moo"}, false},
-		{"de", map[string]interface{}{}, false}, // Empty dictionary
-		{"d3:cowi123ee", map[string]interface{}{"cow": 123}, false},
+		{"d3:cow3:moo4:spam4:eggse", map[string]any{"cow": "moo", "spam": "eggs"}, false},
+		{"d4:bull3:cow3:cow3:mooe", map[string]any{"bull": "cow", "cow": "moo"}, false},
+		{"de", map[string]any{}, false}, // Empty dictionary
+		{"d3:cowi123ee", map[string]any{"cow": 123}, false},
 		{"d3:cow3:moo", nil, true}, // Incomplete dictionary
 	}
 
@@ -141,7 +141,7 @@ func TestDecodeDict(t *testing.T) {
 				if err != nil {
 					t.Errorf("unexpected error for input %s: %v", test.input, err)
 				} else {
-					resultDict, ok := result.(map[string]interface{})
+					resultDict, ok := result.(map[string]any)
 					if !ok {
 						t.Errorf("expected a dictionary for input %s, but got %T", test.input, result)
 					} else if len(resultDict) != len(test.expected) {
@@ -162,13 +162,13 @@ func TestDecodeDict(t *testing.T) {
 func TestDecode(t *testing.T) {
 	tests := []struct {
 		input    string
-		expected interface{}
+		expected any
 		hasError bool
 	}{
 		{"i123e", 123, false},
 		{"4:spam", "spam", false},
-		{"li123ei456ee", []interface{}{123, 456}, false},
-		{"d3:cow3:moo4:spam4:eggse", map[string]interface{}{"cow": "moo", "spam": "eggs"}, false},
+		{"li123ei456ee", []any{123, 456}, false},
+		{"d3:cow3:moo4:spam4:eggse", map[string]any{"cow": "moo", "spam": "eggs"}, false},
 		{"x", nil, true}, // Invalid prefix
 	}
 
@@ -193,8 +193,8 @@ func TestDecode(t *testing.T) {
 						if result != expected {
 							t.Errorf("expected %s, got %v for input %s", expected, result, test.input)
 						}
-					case []interface{}:
-						resultList, ok := result.([]interface{})
+					case []any:
+						resultList, ok := result.([]any)
 						if !ok {
 							t.Errorf("expected a list for input %s, but got %T", test.input, result)
 						} else if len(resultList) != len(expected) {
@@ -206,8 +206,8 @@ func TestDecode(t *testing.T) {
 								}
 							}
 						}
-					case map[string]interface{}:
-						resultDict, ok := result.(map[string]interface{})
+					case map[string]any:
+						resultDict, ok := result.(map[string]any)
 						if !ok {
 							t.Errorf("expected a dictionary for input %s, but got %T", test.input, result)
 						} else if len(resultDict) != len(expected) {

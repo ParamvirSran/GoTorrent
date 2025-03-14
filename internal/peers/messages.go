@@ -3,30 +3,9 @@ package peers
 import (
 	"bytes"
 	"encoding/binary"
+
+	"github.com/ParamvirSran/GoTorrent/internal/types"
 )
-
-// MessageID represents different types of messages in the Peer Wire Protocol
-type MessageID byte
-
-const (
-	MsgChoke         MessageID = 0
-	MsgUnchoke       MessageID = 1
-	MsgInterested    MessageID = 2
-	MsgNotInterested MessageID = 3
-	MsgHave          MessageID = 4
-	MsgBitfield      MessageID = 5
-	MsgRequest       MessageID = 6
-	MsgPiece         MessageID = 7
-	MsgCancel        MessageID = 8
-	MsgPort          MessageID = 9
-	MsgKeepAlive     MessageID = 255
-)
-
-// Message represents a parsed message
-type Message struct {
-	ID      *MessageID // nil for keep-alive message
-	Payload []byte
-}
 
 // KeepAliveMessage returns KEEP-ALIVE message
 func KeepAliveMessage() []byte {
@@ -36,7 +15,7 @@ func KeepAliveMessage() []byte {
 }
 
 // FixedLengthMessage creates a message with no payload
-func FixedLengthMessage(id MessageID) []byte {
+func FixedLengthMessage(id types.MessageID) []byte {
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.BigEndian, uint32(1))
 	buf.WriteByte(byte(id))
@@ -47,7 +26,7 @@ func FixedLengthMessage(id MessageID) []byte {
 func HaveMessage(pieceIndex uint32) []byte {
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.BigEndian, uint32(5))
-	buf.WriteByte(byte(MsgHave))
+	buf.WriteByte(byte(types.MsgHave))
 	binary.Write(buf, binary.BigEndian, pieceIndex)
 	return buf.Bytes()
 }
@@ -56,7 +35,7 @@ func HaveMessage(pieceIndex uint32) []byte {
 func RequestMessage(index, begin, length uint32) []byte {
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.BigEndian, uint32(13))
-	buf.WriteByte(byte(MsgRequest))
+	buf.WriteByte(byte(types.MsgRequest))
 	binary.Write(buf, binary.BigEndian, index)
 	binary.Write(buf, binary.BigEndian, begin)
 	binary.Write(buf, binary.BigEndian, length)
@@ -67,7 +46,7 @@ func RequestMessage(index, begin, length uint32) []byte {
 func CancelMessage(index, begin, length uint32) []byte {
 	buf := new(bytes.Buffer)
 	binary.Write(buf, binary.BigEndian, uint32(13))
-	buf.WriteByte(byte(MsgCancel))
+	buf.WriteByte(byte(types.MsgCancel))
 	binary.Write(buf, binary.BigEndian, index)
 	binary.Write(buf, binary.BigEndian, begin)
 	binary.Write(buf, binary.BigEndian, length)
@@ -79,7 +58,7 @@ func PieceMessage(index, begin uint32, block []byte) []byte {
 	buf := new(bytes.Buffer)
 	length := uint32(9 + len(block))
 	binary.Write(buf, binary.BigEndian, length)
-	buf.WriteByte(byte(MsgPiece))
+	buf.WriteByte(byte(types.MsgPiece))
 	binary.Write(buf, binary.BigEndian, index)
 	binary.Write(buf, binary.BigEndian, begin)
 	buf.Write(block)

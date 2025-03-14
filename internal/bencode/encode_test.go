@@ -63,15 +63,15 @@ func TestEncodeString(t *testing.T) {
 
 func TestEncodeList(t *testing.T) {
 	tests := []struct {
-		input    []interface{}
+		input    []any
 		expected string
 		hasError bool
 	}{
-		{[]interface{}{123, "spam", []interface{}{"nested", 456}}, "li123e4:spaml6:nestedi456eee", false},
-		{[]interface{}{}, "le", false},
-		{[]interface{}{"a", "b", "c"}, "l1:a1:b1:ce", false},
-		{[]interface{}{"spam", "eggs"}, "l4:spam4:eggse", false},
-		{[]interface{}{nil}, "", true}, // Handling nil as error
+		{[]any{123, "spam", []any{"nested", 456}}, "li123e4:spaml6:nestedi456eee", false},
+		{[]any{}, "le", false},
+		{[]any{"a", "b", "c"}, "l1:a1:b1:ce", false},
+		{[]any{"spam", "eggs"}, "l4:spam4:eggse", false},
+		{[]any{nil}, "", true}, // Handling nil as error
 	}
 
 	for _, test := range tests {
@@ -95,14 +95,14 @@ func TestEncodeList(t *testing.T) {
 
 func TestEncodeDict(t *testing.T) {
 	tests := []struct {
-		input    map[string]interface{}
+		input    map[string]any
 		expected string
 		hasError bool
 	}{
-		{map[string]interface{}{"cow": "moo", "spam": "eggs"}, "d3:cow3:moo4:spam4:eggse", false},
-		{map[string]interface{}{}, "de", false},
-		{map[string]interface{}{"key": "value", "nested": map[string]interface{}{"nkey": "nvalue"}}, "d3:key5:value6:nestedd4:nkey6:nvalueee", false},
-		{map[string]interface{}{"key": nil}, "", true}, // Handling nil as error
+		{map[string]any{"cow": "moo", "spam": "eggs"}, "d3:cow3:moo4:spam4:eggse", false},
+		{map[string]any{}, "de", false},
+		{map[string]any{"key": "value", "nested": map[string]any{"nkey": "nvalue"}}, "d3:key5:value6:nestedd4:nkey6:nvalueee", false},
+		{map[string]any{"key": nil}, "", true}, // Handling nil as error
 	}
 
 	for _, test := range tests {
@@ -126,14 +126,14 @@ func TestEncodeDict(t *testing.T) {
 
 func TestEncode(t *testing.T) {
 	tests := []struct {
-		input    interface{}
+		input    any
 		expected string
 		hasError bool
 	}{
 		{123, "i123e", false},
 		{"spam", "4:spam", false},
-		{[]interface{}{123, "spam", []interface{}{"nested", 456}}, "li123e4:spaml6:nestedi456eee", false},
-		{map[string]interface{}{"cow": "moo", "spam": "eggs"}, "d3:cow3:moo4:spam4:eggse", false},
+		{[]any{123, "spam", []any{"nested", 456}}, "li123e4:spaml6:nestedi456eee", false},
+		{map[string]any{"cow": "moo", "spam": "eggs"}, "d3:cow3:moo4:spam4:eggse", false},
 		{3.14, "", true}, // Unsupported type
 		{nil, "", true},  // Nil value
 	}

@@ -12,6 +12,7 @@ import (
 
 	"github.com/ParamvirSran/GoTorrent/internal/peers"
 	"github.com/ParamvirSran/GoTorrent/internal/torrent"
+	"github.com/ParamvirSran/GoTorrent/internal/types"
 )
 
 const (
@@ -74,7 +75,7 @@ func parseArgs() string {
 	return os.Args[1]
 }
 
-func initializeTorrent(torrentPath string) (*torrent.Torrent, []byte, []byte, error) {
+func initializeTorrent(torrentPath string) (*types.Torrent, []byte, []byte, error) {
 	torrentFile, err := torrent.ParseTorrentFile(torrentPath)
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("error parsing torrent file (%s): %w", torrentPath, err)
@@ -94,7 +95,7 @@ func initializeTorrent(torrentPath string) (*torrent.Torrent, []byte, []byte, er
 	return torrentFile, infohash, []byte(peerID), nil
 }
 
-func getPeers(torrentFile *torrent.Torrent, infoHash, peerID []byte) ([]string, []string, error) {
+func getPeers(torrentFile *types.Torrent, infoHash, peerID []byte) ([]string, []string, error) {
 	trackerList := torrent.GatherTrackers(torrentFile)
 	if len(trackerList) == 0 {
 		return nil, nil, fmt.Errorf("no valid trackers found")
@@ -116,7 +117,7 @@ func getPeers(torrentFile *torrent.Torrent, infoHash, peerID []byte) ([]string, 
 	return peerIDList, peerAddressList, nil
 }
 
-func peerManager(torrentFile *torrent.Torrent, ctx context.Context, peerIDList, peerAddressList []string, infohash, clientID []byte) {
+func peerManager(torrentFile *types.Torrent, ctx context.Context, peerIDList, peerAddressList []string, infohash, clientID []byte) {
 	var wg sync.WaitGroup
 	sem := make(chan struct{}, maxConcurrentPeers)
 	pm := torrentFile.PieceManager
@@ -145,7 +146,7 @@ func peerManager(torrentFile *torrent.Torrent, ctx context.Context, peerIDList, 
 	log.Println("All peer connections finished. Peer manager finished")
 }
 
-func monitorDownloadCompletion(ctx context.Context, cancel context.CancelFunc, torrentFile *torrent.Torrent) {
+func monitorDownloadCompletion(ctx context.Context, cancel context.CancelFunc, torrentFile *types.Torrent) {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 

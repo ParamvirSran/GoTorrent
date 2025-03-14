@@ -14,27 +14,13 @@ import (
 
 	"github.com/ParamvirSran/GoTorrent/internal/bencode"
 	"github.com/ParamvirSran/GoTorrent/internal/peers"
+	"github.com/ParamvirSran/GoTorrent/internal/types"
 )
 
 const (
 	_peerIDPrefix    = "-GO0001-"
 	_compactPeerList = 0
 )
-
-// TrackerConfig defines configurable parameters for tracker communication
-type TrackerConfig struct {
-	timeout time.Duration
-}
-
-// newTrackerClient creates a new HTTP client with a customizable timeout
-func newTrackerClient(config *TrackerConfig) *http.Client {
-	if config == nil {
-		config = &TrackerConfig{timeout: 10 * time.Second}
-	}
-	return &http.Client{
-		Timeout: config.timeout,
-	}
-}
 
 // ContactTrackers tries to contact multiple trackers and gather peers
 func ContactTrackers(trackers []string, infoHash, peerID, event string, uploaded, downloaded, left int, port string) ([]string, []string, error) {
@@ -72,7 +58,7 @@ func ContactTrackers(trackers []string, infoHash, peerID, event string, uploaded
 }
 
 // GatherTrackers extracts and returns a list of tracker URLs from the torrent file
-func GatherTrackers(torrentFile *Torrent) []string {
+func GatherTrackers(torrentFile *types.Torrent) []string {
 	trackers := []string{torrentFile.Announce}
 	for _, tier := range torrentFile.AnnounceList {
 		for _, t := range tier {
@@ -103,7 +89,7 @@ func GeneratePeerID() (string, error) {
 }
 
 // GetInfohash calculates the SHA-1 hash of the bencoded "info" dictionary
-func GetInfohash(info *InfoDictionary) ([]byte, error) {
+func GetInfohash(info *types.InfoDictionary) ([]byte, error) {
 	infoMap := make(map[string]any)
 	infoMap["name"] = info.Name
 	infoMap["piece length"] = info.PieceLength
@@ -225,7 +211,7 @@ func extractPeersFromTracker(trackerURL, infoHash, peerID, event string, uploade
 		return nil, nil, fmt.Errorf("error building announce URL: %w", err)
 	}
 
-	client := newTrackerClient(nil)
+	client := &http.Client{Timeout: time.Minute}
 	resp, err := sendGetRequest(requestURL, client)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error sending GET request: %w", err)

@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ParamvirSran/GoTorrent/internal/common"
+	"github.com/ParamvirSran/GoTorrent/internal/types"
 )
 
 const (
@@ -21,33 +21,18 @@ const (
 	BlockSize               = 16384
 )
 
-// Peer represents a connected peer
-type Peer struct {
-	peerID    string
-	address   string
-	peerState PeerState
-}
-
-// PeerState represents the connection state with a peer
-type PeerState struct {
-	amChoking      bool
-	amInterested   bool
-	peerChoking    bool
-	peerInterested bool
-}
-
 // HandlePeerConnection manages a single peer connection
-func HandlePeerConnection(pm *common.PieceManager, ctx context.Context, peerID string, infoHash, clientID []byte, peerAddress string) error {
+func HandlePeerConnection(pm *types.PieceManager, ctx context.Context, peerID string, infoHash, clientID []byte, peerAddress string) error {
 	peerContext, peerCancel := context.WithCancel(ctx)
 	defer peerCancel()
 
 	peer := createPeer(peerID, peerAddress)
-	handshake, err := CreateHandshake(infoHash, clientID)
+	handshake, err := types.NewHandshake(infoHash, clientID)
 	if err != nil {
 		return fmt.Errorf("error creating handshake: %v", err)
 	}
 
-	conn, err := connectToPeer(peerContext, peer.address)
+	conn, err := connectToPeer(peerContext, peer.Address)
 	if err != nil {
 		return err
 	}
@@ -94,7 +79,7 @@ func receiveHandshakeResponse(peerID string, conn net.Conn, infoHash []byte) err
 		return fmt.Errorf("failed to read handshake response: %v", err)
 	}
 
-	if err := ValidateHandshakeResponse(peerID, response[:n], [20]byte(infoHash)); err != nil {
+	if err := types.ValidateHandshakeResponse(peerID, response[:n], [20]byte(infoHash)); err != nil {
 		return fmt.Errorf("invalid handshake response: %v", err)
 	}
 	return nil
@@ -124,12 +109,12 @@ func startKeepAlive(ctx context.Context, conn net.Conn) func() {
 }
 
 // processMessages processes incoming messages from the peer
-func processMessages(ctx context.Context, conn net.Conn, peer *Peer, pm *common.PieceManager) error {
+func processMessages(ctx context.Context, conn net.Conn, peer *types.Peer, pm *types.PieceManager) error {
 	lastActivity := time.Now()
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("Disconnecting from peer: %s", peer.address)
+			log.Printf("Disconnecting from peer: %s", peer.Address)
 			return nil
 		default:
 			conn.SetReadDeadline(time.Now().Add(PeerTimeout))
@@ -147,58 +132,78 @@ func processMessages(ctx context.Context, conn net.Conn, peer *Peer, pm *common.
 			}
 
 			if time.Since(lastActivity) > PeerTimeout {
-				return fmt.Errorf("peer %s timed out", peer.address)
+				return fmt.Errorf("peer %s timed out", peer.Address)
 			}
 		}
 	}
 }
 
 // handleMessage handles a received message
-func handleMessage(conn net.Conn, ctx context.Context, pm *common.PieceManager, peer *Peer, msg Message) {
+func handleMessage(conn net.Conn, ctx context.Context, pm *types.PieceManager, peer *types.Peer, msg types.Message) {
 	switch *msg.ID {
-	case MsgChoke:
-		peer.peerState.peerChoking = true
-	case MsgUnchoke:
-		peer.peerState.peerChoking = false
-	case MsgInterested:
-		peer.peerState.peerInterested = true
-	case MsgNotInterested:
-		peer.peerState.peerInterested = false
-	case MsgHave:
+	case types.MsgChoke:
+		peer.PeerState.PeerChoking = true
+	case types.MsgUnchoke:
+		peer.PeerState.PeerChoking = false
+	case types.MsgInterested:
+		peer.PeerState.PeerInterested = true
+	case types.MsgNotInterested:
+		peer.PeerState.PeerInterested = false
+	case types.MsgHave:
 		pieceIndex := binary.BigEndian.Uint32(msg.Payload)
-		log.Printf("%s - Received HAVE message for piece %d", peer.address, pieceIndex)
+		log.Printf("%s - Received HAVE message for piece %d", peer.Address, pieceIndex)
 		if pm.ClaimPiece(int(pieceIndex)) {
 			go worker(peer, ctx, pm, pieceIndex, conn)
 		}
-	case MsgBitfield:
-		log.Printf("%s - Received BITFIELD message: %x", peer.address, msg.Payload)
-	case MsgRequest:
+	case types.MsgBitfield:
+		log.Printf("%s - Received BITFIELD message: %x", peer.Address, msg.Payload)
+	case types.MsgRequest:
 		index := binary.BigEndian.Uint32(msg.Payload[0:4])
 		begin := binary.BigEndian.Uint32(msg.Payload[4:8])
 		length := binary.BigEndian.Uint32(msg.Payload[8:12])
-		log.Printf("%s - Received REQUEST message for index %d, begin %d, length %d", peer.address, index, begin, length)
-	case MsgPiece:
+		log.Printf("%s - Received REQUEST message for index %d, begin %d, length %d", peer.Address, index, begin, length)
+	case types.MsgPiece:
 		index := binary.BigEndian.Uint32(msg.Payload[0:4])
 		begin := binary.BigEndian.Uint32(msg.Payload[4:8])
 		block := msg.Payload[8:]
-		log.Printf("%s - Received PIECE message for index %d, begin %d, block length %d", peer.address, index, begin, len(block))
-	case MsgCancel:
+		log.Printf("%s - Received PIECE message for index %d, begin %d, block length %d", peer.Address, index, begin, len(block))
+	case types.MsgCancel:
 		index := binary.BigEndian.Uint32(msg.Payload[0:4])
 		begin := binary.BigEndian.Uint32(msg.Payload[4:8])
 		length := binary.BigEndian.Uint32(msg.Payload[8:12])
-		log.Printf("%s - Received CANCEL message for index %d, begin %d, length %d", peer.address, index, begin, length)
-	case MsgPort:
+		log.Printf("%s - Received CANCEL message for index %d, begin %d, length %d", peer.Address, index, begin, length)
+	case types.MsgPort:
 		port := binary.BigEndian.Uint16(msg.Payload)
-		log.Printf("%s - Received PORT message with port %d", peer.address, port)
+		log.Printf("%s - Received PORT message with port %d", peer.Address, port)
 	default:
-		log.Printf("%s - Received unknown message ID %d", peer.address, *msg.ID)
+		log.Printf("%s - Received unknown message ID %d", peer.Address, *msg.ID)
 	}
 }
 
 // worker downloads a piece from the peer
-func worker(peer *Peer, ctx context.Context, pm *common.PieceManager, index uint32, conn net.Conn) {
+func worker(peer *types.Peer, ctx context.Context, pm *types.PieceManager, index uint32, conn net.Conn) {
 	var offset uint32 = 0
 	piece := make([]byte, pm.PieceSize)
+
+	_, err := conn.Write(FixedLengthMessage(2))
+	if err != nil {
+		log.Println("Error when worker writing the interested message", err)
+		return
+	}
+	peer.PeerState.AmInterested = true
+
+	for {
+		message, err := ReadMessage(conn)
+		if err != nil {
+			log.Println("Error when worker reading next message", err)
+			return
+		}
+		log.Println("Message received: ", message)
+		if message.ID != nil && types.MessageID(*message.ID) == types.MsgUnchoke {
+			peer.PeerState.PeerChoking = false
+			break
+		}
+	}
 
 	for offset < uint32(pm.PieceSize) {
 		select {
@@ -228,7 +233,7 @@ func worker(peer *Peer, ctx context.Context, pm *common.PieceManager, index uint
 			}
 
 			// Verify the block response
-			if *msg.ID != MsgPiece {
+			if *msg.ID != types.MsgPiece {
 				log.Printf("worker: Expected PIECE message, got message ID %d", *msg.ID)
 				break
 			}
@@ -260,38 +265,38 @@ func worker(peer *Peer, ctx context.Context, pm *common.PieceManager, index uint
 }
 
 // ReadMessage reads a message from a connection
-func ReadMessage(conn net.Conn) (Message, error) {
+func ReadMessage(conn net.Conn) (types.Message, error) {
 	var length uint32
 	if err := binary.Read(conn, binary.BigEndian, &length); err != nil {
-		return Message{}, err
+		return types.Message{}, err
 	}
 
 	if length == 0 {
-		return Message{ID: nil, Payload: nil}, nil // Keep-alive message
+		return types.Message{ID: nil, Payload: nil}, nil // Keep-alive message
 	}
 
 	buf := make([]byte, length)
 	if _, err := io.ReadFull(conn, buf); err != nil {
-		return Message{}, err
+		return types.Message{}, err
 	}
 
-	messageId := MessageID(buf[0])
-	return Message{
+	messageId := types.MessageID(buf[0])
+	return types.Message{
 		ID:      &messageId,
 		Payload: buf[1:],
 	}, nil
 }
 
 // createPeer initializes a new peer object
-func createPeer(peerID, address string) *Peer {
-	return &Peer{
-		peerID:  peerID,
-		address: address,
-		peerState: PeerState{
-			amChoking:      true,
-			amInterested:   false,
-			peerChoking:    true,
-			peerInterested: false,
+func createPeer(peerID, address string) *types.Peer {
+	return &types.Peer{
+		PeerID:  peerID,
+		Address: address,
+		PeerState: types.PeerState{
+			AmChoking:      true,
+			AmInterested:   false,
+			PeerChoking:    true,
+			PeerInterested: false,
 		},
 	}
 }
