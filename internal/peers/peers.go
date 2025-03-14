@@ -79,7 +79,7 @@ func receiveHandshakeResponse(peerID string, conn net.Conn, infoHash []byte) err
 		return fmt.Errorf("failed to read handshake response: %v", err)
 	}
 
-	if err := types.ValidateHandshakeResponse(peerID, response[:n], [20]byte(infoHash)); err != nil {
+	if err := types.ValidateHandshakeResponse(response[:n], [20]byte(infoHash)); err != nil {
 		return fmt.Errorf("invalid handshake response: %v", err)
 	}
 	return nil
@@ -153,7 +153,7 @@ func handleMessage(conn net.Conn, ctx context.Context, pm *types.PieceManager, p
 		pieceIndex := binary.BigEndian.Uint32(msg.Payload)
 		log.Printf("%s - Received HAVE message for piece %d", peer.Address, pieceIndex)
 		if pm.ClaimPiece(int(pieceIndex)) {
-			go worker(peer, ctx, pm, pieceIndex, conn)
+			worker(peer, ctx, pm, pieceIndex, conn)
 		}
 	case types.MsgBitfield:
 		log.Printf("%s - Received BITFIELD message: %x", peer.Address, msg.Payload)
@@ -185,30 +185,35 @@ func worker(peer *types.Peer, ctx context.Context, pm *types.PieceManager, index
 	var offset uint32 = 0
 	piece := make([]byte, pm.PieceSize)
 
-	_, err := conn.Write(FixedLengthMessage(2))
-	if err != nil {
-		log.Println("Error when worker writing the interested message", err)
+	// Send INTERESTED message to the peer
+	if _, err := conn.Write(FixedLengthMessage(types.MsgInterested)); err != nil {
+		log.Printf("worker: Error sending INTERESTED message: %v", err)
 		return
 	}
 	peer.PeerState.AmInterested = true
 
+	// Wait for UNCHOKE message from the peer
 	for {
-		message, err := ReadMessage(conn)
+		msg, err := ReadMessage(conn)
 		if err != nil {
-			log.Println("Error when worker reading next message", err)
+			log.Printf("worker: Error reading UNCHOKE message: %v", err)
 			return
 		}
-		log.Println("Message received: ", message)
-		if message.ID != nil && types.MessageID(*message.ID) == types.MsgUnchoke {
+
+		if msg.ID != nil && *msg.ID == types.MsgUnchoke {
 			peer.PeerState.PeerChoking = false
 			break
+		} else if msg.ID != nil && *msg.ID == types.MsgChoke {
+			log.Printf("worker: Peer choked, stopping download of piece %d from peer %s", index, conn.RemoteAddr())
+			return
 		}
 	}
 
+	// Download the piece in blocks
 	for offset < uint32(pm.PieceSize) {
 		select {
 		case <-ctx.Done():
-			log.Printf("worker: context finished early: piece (%d) from peer (%s)", index, conn.RemoteAddr())
+			log.Printf("worker: Context canceled, stopping download of piece %d from peer %s", index, conn.RemoteAddr())
 			return
 		default:
 			// Calculate the block size (usually 16 KB, but smaller for the last block)
@@ -217,40 +222,45 @@ func worker(peer *types.Peer, ctx context.Context, pm *types.PieceManager, index
 				blockSize = uint32(pm.PieceSize) - offset
 			}
 
-			// Send a request for the block
-			// might need to send interested message and a unchoke meesage
+			// Send a REQUEST message for the block
 			request := RequestMessage(index, offset, blockSize)
 			if _, err := conn.Write(request); err != nil {
-				log.Printf("worker: Error sending request for piece %d, offset %d: %v", index, offset, err)
+				log.Printf("worker: Error sending REQUEST message for piece %d, offset %d: %v", index, offset, err)
 				return
 			}
 
-			// Read the block response
+			// Read the PIECE message response
 			msg, err := ReadMessage(conn)
 			if err != nil {
-				log.Printf("worker: Error reading block for piece %d, offset %d: %v", index, offset, err)
+				log.Printf("worker: Error reading PIECE message for piece %d, offset %d: %v", index, offset, err)
 				return
 			}
 
-			// Verify the block response
-			if *msg.ID != types.MsgPiece {
-				log.Printf("worker: Expected PIECE message, got message ID %d", *msg.ID)
-				break
-			}
+			// Handle the PIECE message
+			if msg.ID != nil && *msg.ID == types.MsgPiece {
+				receivedIndex := binary.BigEndian.Uint32(msg.Payload[0:4])
+				receivedBegin := binary.BigEndian.Uint32(msg.Payload[4:8])
+				block := msg.Payload[8:]
 
-			// Copy the block into the piece
-			receivedIndex := binary.BigEndian.Uint32(msg.Payload[0:4])
-			receivedBegin := binary.BigEndian.Uint32(msg.Payload[4:8])
-			block := msg.Payload[8:]
+				// Verify the block
+				if receivedIndex != index || receivedBegin != offset {
+					log.Printf("worker: Mismatch in received block: expected index %d, offset %d; got index %d, offset %d",
+						index, offset, receivedIndex, receivedBegin)
+					return
+				}
 
-			if receivedIndex != index || receivedBegin != offset {
-				log.Printf("worker: Mismatch in received block: expected index %d, offset %d; got index %d, offset %d",
-					index, offset, receivedIndex, receivedBegin)
+				// Copy the block into the piece
+				copy(piece[offset:offset+blockSize], block)
+				offset += blockSize
+			} else if msg.ID != nil && *msg.ID == types.MsgChoke {
+				// Handle peer choking
+				peer.PeerState.PeerChoking = true
+				log.Printf("worker: Peer choked, stopping download of piece %d from peer %s", index, conn.RemoteAddr())
+				return
+			} else {
+				log.Printf("worker: Unexpected message ID %d", *msg.ID)
 				return
 			}
-
-			copy(piece[offset:offset+blockSize], block)
-			offset += blockSize
 		}
 	}
 
@@ -278,6 +288,10 @@ func ReadMessage(conn net.Conn) (types.Message, error) {
 	buf := make([]byte, length)
 	if _, err := io.ReadFull(conn, buf); err != nil {
 		return types.Message{}, err
+	}
+
+	if len(buf) < 1 {
+		return types.Message{}, fmt.Errorf("invalid message: no message ID")
 	}
 
 	messageId := types.MessageID(buf[0])

@@ -3,7 +3,6 @@ package types
 import (
 	"bytes"
 	"fmt"
-	"log"
 )
 
 // SerializeHandshake turns the handshake into a byte slice to send over the wire
@@ -19,22 +18,14 @@ func (h *Handshake) SerializeHandshake() []byte {
 }
 
 // ValidateHandshakeResponse will check if received handshake is valid
-func ValidateHandshakeResponse(peerID string, response []byte, expectedInfoHash [20]byte) error {
-	log.Printf("received in handshake peerid (%x) - expected peerid (%x)", response[48:], peerID)
-
+func ValidateHandshakeResponse(response []byte, expectedInfoHash [20]byte) error {
 	if len(response) < 68 {
-		return fmt.Errorf("invalid handshake response length: %d", len(response))
+		return fmt.Errorf("handshake response too short: %d bytes", len(response))
 	}
 
-	protocolStr := string(response[1:20])
-	if protocolStr != ProtocolString {
-		return fmt.Errorf("invalid protocol string: %s", protocolStr)
-	}
-
-	var infoHash [20]byte
-	copy(infoHash[:], response[28:48])
+	infoHash := [20]byte(response[28:48])
 	if !bytes.Equal(infoHash[:], expectedInfoHash[:]) {
-		return fmt.Errorf("invalid info hash: %x", infoHash)
+		return fmt.Errorf("invalid info hash: expected %x, got %x", expectedInfoHash, infoHash)
 	}
 
 	return nil

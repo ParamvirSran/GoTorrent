@@ -14,11 +14,11 @@ func KeepAliveMessage() []byte {
 	return buf.Bytes()
 }
 
-// FixedLengthMessage creates a message with no payload
+// FixedLengthMessage creates a fixed-length message
 func FixedLengthMessage(id types.MessageID) []byte {
 	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.BigEndian, uint32(1))
-	buf.WriteByte(byte(id))
+	binary.Write(buf, binary.BigEndian, uint32(1)) // Length = 1
+	buf.WriteByte(byte(id))                        // Message ID
 	return buf.Bytes()
 }
 
@@ -34,11 +34,11 @@ func HaveMessage(pieceIndex uint32) []byte {
 // RequestMessage creates a REQUEST message
 func RequestMessage(index, begin, length uint32) []byte {
 	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.BigEndian, uint32(13))
-	buf.WriteByte(byte(types.MsgRequest))
-	binary.Write(buf, binary.BigEndian, index)
-	binary.Write(buf, binary.BigEndian, begin)
-	binary.Write(buf, binary.BigEndian, length)
+	binary.Write(buf, binary.BigEndian, uint32(13)) // Length = 13
+	buf.WriteByte(byte(types.MsgRequest))           // Message ID
+	binary.Write(buf, binary.BigEndian, index)      // Piece index
+	binary.Write(buf, binary.BigEndian, begin)      // Block offset
+	binary.Write(buf, binary.BigEndian, length)     // Block length
 	return buf.Bytes()
 }
 
